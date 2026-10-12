@@ -37,3 +37,22 @@ def note():
 
 if __name__ == "__main__":
     cli()
+
+
+@cli.command()
+def memory():
+    """Memory management"""
+    from .memory import Memory
+    mem = Memory()
+    console.print("[blue]🧠[/blue] Memory system ready")
+    console.print(f"Storage: {mem.memory_file}")
+
+
+@cli.command()
+def task():
+    """Quick task creation"""
+    from .tasks import TaskManager
+    title = click.prompt("Task title")
+    tm = TaskManager()
+    task = tm.add_task(title)
+    console.print(f"[green]✓[/green] Task created: {task.title}")
