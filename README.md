@@ -8,9 +8,11 @@ Jarvis is a minimal, local-first personal assistant built to augment focus, capt
 - **Extensible**: easy to add tools/commands as needs evolve
 - **Lightweight**: minimal dependencies, fast to run
 - **CLI-based**: clean command-line interface
+- **Conversational**: interactive chat mode with basic natural language
 - **Note-taking**: quick capture and local storage
 - **Memory**: remember and recall information
 - **Task management**: create and track tasks
+- **Weather**: local weather information
 - **Status monitoring**: check system status
 
 ## Quick start
@@ -29,21 +31,33 @@ pip install -e .
 # Run Jarvis
 python3 main.py --help
 python3 main.py status
-python3 main.py note
-python3 main.py task
-python3 main.py memory
-python3 main.py start
+python3 main.py chat      # Interactive chat
+python3 main.py note      # Quick note
+python3 main.py task      # Create task
+python3 main.py memory    # Memory system
+python3 main.py weather   # Weather info
+python3 main.py start     # Start mode
 ```
 
 ## Usage
 
 ```bash
+jarvis chat     # Start conversation with Jarvis
 jarvis status   # Check Jarvis status
 jarvis note     # Capture a quick note
 jarvis task     # Create a task
 jarvis memory   # Access memory system
-jarvis start    # Start interactive mode
+jarvis weather  # Get weather info
+jarvis start    # Start Jarvis mode
 ```
+
+## What it can do
+
+- **Chat**: Have a conversation - say hello, ask for time/date, get help
+- **Notes**: Save notes locally to `data/notes.json`
+- **Tasks**: Create and manage tasks in `data/tasks.json`
+- **Memory**: Store key-value pairs in `data/memory.json`
+- **Weather**: Get current weather info (local/mock)
 
 ## Project Structure
 
@@ -51,11 +65,13 @@ jarvis start    # Start interactive mode
 jarvis/
 ├── jarvis/           # Core package
 │   ├── __init__.py
-│   ├── cli.py        # CLI commands
-│   ├── core.py       # Core logic & notes
-│   ├── memory.py     # Memory system
-│   ├── tasks.py      # Task management
-│   └── __main__.py   # Module entry
+│   ├── assistant.py   # Conversational assistant
+│   ├── cli.py         # CLI commands
+│   ├── core.py        # Core logic & notes
+│   ├── memory.py      # Memory system
+│   ├── tasks.py       # Task management
+│   ├── weather.py     # Weather module
+│   └── __main__.py    # Module entry
 ├── main.py           # Entry point
 ├── requirements.txt  # Dependencies
 ├── setup.py          # Package setup
