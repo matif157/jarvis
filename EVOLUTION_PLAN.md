@@ -161,3 +161,184 @@ So direction is clear - implement API key management system (like Atif's) with s
 
 ## Next Steps
 After user approves plan, implement in order. Keep changes incremental and testable.
+
+## Detailed Implementation Steps
+
+### 1. DB Schema for Jarvis
+Create `jarvis/db.py` with SQLite schema mirroring Atif's patterns. Key tables:
+- `settings(key, value, updated_at)` - for config and provider keys (api keys under `provider.*` prefix)
+- `providers_state(name, enabled, model, url, updated_at)` - optional for provider state
+- `notes(id, title, body, tags, created_at, updated_at)` - migrate from JSON
+- `tasks(id, title, description, status, priority, created_at, updated_at)` - migrate from JSON
+- `memory(id, key, value, updated_at)` - migrate from JSON
+- `messages(session_id, role, content, labels, created_at)` - for conversation history
+- Keep JSON as fallback during migration
+
+Schema functions: `init_db()`, `connect()`, `set_setting()`, `get_setting()`, `delete_setting()`, CRUD for notes/tasks/memory.
+
+### 2. Settings & API Key Management
+- Add to `jarvis/db.py`: settings functions (mirror Atif's pattern)
+- Add to `jarvis/llm.py`: provider abstraction (providers: groq, gemini, openrouter, ollama)
+  - Functions: `provider_key()`, `provider_model()`, `provider_enabled()`, `provider_status()`, `mask_key()`, `_override()` (checks DB first, falls back to env)
+  - Store keys as `provider.{name}.api_key`, models as `provider.{name}.model`, enabled as `provider.{name}.enabled`
+- Add CLI commands in `jarvis/cli.py`:
+  - `jarvis settings` - show current settings (masked)
+  - `jarvis settings set <key> <value>` - set setting
+  - `jarvis settings unset <key>` - clear setting
+  - `jarvis providers` - list providers with status
+  - `jarvis providers test [name]` - test providers
+- API key masking: show last 4 chars like `…abcd`, never return full keys
+
+### 3. LLM Integration
+- Create `jarvis/llm.py` with handlers for each provider (similar to Atif)
+- Chat modes:
+  - Basic (current): keyword-based, no API keys needed - keep as default fallback
+  - LLM: use providers if any configured/tested ready; fallback gracefully
+- Update `jarvis/assistant.py`: add `use_llm` mode, detect if providers configured
+- Update chat to prefer LLM when available, explain fallback if none
+
+### 4. API Server (FastAPI) for Settings/Integration
+Add `jarvis/app.py` (or `server.py`) with endpoints matching Atif's API for interoperability:
+- `GET /api/health` - health check
+- `GET /api/settings` - get non-provider settings (provider keys never returned)
+- `POST /api/settings` - save settings (skip provider.*)
+- `GET /api/providers` - list providers with masked keys, ready status
+- `POST /api/providers/{name}` - save provider config (api_key/model/url/enabled/clear_key)
+- `POST /api/providers/{name}/test` - test specific provider
+- `POST /api/providers/test` - test all providers
+- `POST /api/ask` - chat endpoint (Atif-compatible for easy integration)
+- `GET /` - serve web UI if enabled
+
+Also add CLI: `jarvis serve` or `jarvis server --port 8771` (avoid conflict with Atif on 8770)
+
+### 5. Web UI for Settings & API Keys
+Create `jarvis/web/` with:
+- `index.html` - settings page for providers/API keys (mirroring Atif's settings panel)
+- `app.js` - handle provider CRUD, testing, masking
+- `style.css` - styling
+- API calls to `/api/providers` endpoints
+
+UI should allow: toggle provider on/off, enter API key (password field), set model, test single/all, clear key. Show masked key when saved.
+
+### 6. Connect Jarvis to Atif Assistant
+Two approaches:
+**A. Client mode (consume Atif API):**
+- Add config: `ATIF_ASSISTANT_URL` (default http://127.0.0.1:8770)
+- Add `jarvis atif status` - check if Atif is running
+- Add `jarvis atif chat` - chat via Atif's `/api/ask` endpoint
+- In assistant, add option to route through Atif when available/configured
+- CLI flag: `--atif` or env var `JARVIS_USE_ATIF=1`
+
+**B. Shared backend / compatibility:**
+- Make Jarvis's `/api/ask` endpoint compatible with Atif's request/response format
+- This allows Atif UI to potentially talk to Jarvis or vice versa
+- Shared understanding of session, routing, labels
+
+**C. Bridge command:**
+- `jarvis link atif` - configure connection to Atif instance
+- Store Atif URL in settings
+
+Implementation: add `jarvis/atif_client.py` with methods to call Atif API, handle errors gracefully.
+
+### 7. Migration Path
+- On first run with new DB, detect if JSON files exist (data/notes.json, tasks.json, memory.json)
+- Offer to migrate: copy data preserving IDs/timestamps
+- Keep JSON files as backup or remove after successful migration
+- Backward compatible: CLI commands still work the same way
+- Add `jarvis migrate` command to run migration explicitly
+
+## Implementation Phases (Recommended Order)
+
+| Phase | Focus | Deliverables | Priority |
+|---|---|---|---|
+| Phase 1 | DB + Settings | jarvis/db.py, settings CRUD, CLI settings commands | High |
+| Phase 2 | Providers + API Keys | jarvis/llm.py, provider management, key masking, test endpoints | High |
+| Phase 3 | LLM Integration | Update assistant/chat to use LLM with fallback | High |
+| Phase 4 | API Server | jarvis/app.py with FastAPI, endpoints for settings/providers/ask | High |
+| Phase 5 | Web UI | web/ files for settings UI (providers, API keys management) | Medium |
+| Phase 6 | Atif Integration | jarvis/atif_client.py, connect commands, detect Atif running | High |
+| Phase 7 | Migration | JSON→SQLite migration, preserve backward compatibility | Medium |
+| Phase 8 | Polish | Enhanced assistant with routing/engine, docs, tests | Low |
+
+## Example Usage After Implementation
+
+### Managing API Keys
+```bash
+# View current settings (keys masked)
+jarvis settings
+
+# Set provider API key
+jarvis settings set provider.groq.api_key sk-xxx...
+
+# Enable/disable provider
+jarvis settings set provider.ollama.enabled false
+
+# List providers with status
+jarvis providers
+
+# Test all providers
+jarvis providers test
+```
+
+### Server Mode (API + Web UI)
+```bash
+# Start Jarvis as API server (like Atif)
+jarvis serve --port 8771
+
+# Open in browser for settings UI
+open http://127.0.0.1:8771
+```
+
+### Connect to Atif Assistant
+```bash
+# Check if Atif is running
+jarvis atif status
+
+# Chat via Atif
+jarvis atif chat
+
+# Configure Atif URL
+jarvis settings set atif.url http://localhost:8770
+```
+
+### Enhanced Chat
+```bash
+# Uses LLM if providers configured, falls back to basic
+jarvis chat
+
+# Force basic mode
+jarvis chat --basic
+
+# Force LLM mode
+jarvis chat --llm
+```
+
+## Testing Strategy
+1. Unit tests for db operations, settings, masking
+2. Provider key storage/retrieval with DB override vs env
+3. API key masking (never expose full keys)
+4. Provider test endpoints (with/without keys)
+5. Fallback behavior when no providers configured
+6. Migration from JSON to SQLite
+7. Atif connectivity (mock server tests)
+8. Backward compatibility - existing CLI commands still work
+
+## Key Design Principles
+- **Security**: API keys never returned in full; masked in API/UI; stored in SQLite locally
+- **Flexibility**: DB overrides env (can clear in UI even if env set)
+- **Graceful degradation**: Basic mode always works without external dependencies
+- **Interoperability**: API endpoints compatible with Atif where possible
+- **Local-first**: All data stays local by default
+- **Backward compatible**: Existing commands and data preserved
+
+## Notes from Atif Analysis (relevant for implementation)
+- Settings stored in SQLite, provider.* keys excluded from general settings GET
+- Keys can be cleared by setting empty or via clear_key flag
+- Live readiness requires probing (not just presence) - cache results
+- Provider order configurable via env, DB can override models/enabled
+- Masking shows last 4 chars only
+
+## Recommendation
+Start with Phase 1-4 (DB, providers, LLM, API server) as core. Phase 5-6 add UI and Atif integration. This matches the user's request: "connect it with atif assistant and create an api key system (i can customize this all insetting so avail all the optioin in setting)"
+
+The API key system with full settings customization is covered in Phases 1-2-4-5; Atif connection in Phase 6.
