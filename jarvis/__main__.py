@@ -1,4 +1,4 @@
-"""Main module for Jarvis"""
+"""Main module for Jarvis."""
 
 from .cli import cli
 

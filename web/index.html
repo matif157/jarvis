@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Settings</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <strong>JARVIS</strong>
+      <span class="sub">settings</span>
+    </header>
+
+    <section>
+      <h2>Models &amp; API keys</h2>
+      <p class="hint">Paste a key, test it, then save. Keys are stored locally and shown masked.</p>
+      <div id="providers-list" class="providers"></div>
+      <div class="actions">
+        <button id="test-all-providers">TEST ALL</button>
+      </div>
+      <div id="providers-status" class="status"></div>
+    </section>
+
+    <section>
+      <h2>Preferences</h2>
+      <label>Atif Assistant URL
+        <input id="set-atif-url" placeholder="http://127.0.0.1:8770">
+      </label>
+      <label>Answer mode
+        <select id="set-mode">
+          <option value="auto">Auto (Atif, then AI, then basics)</option>
+          <option value="basic">Basic (offline only)</option>
+          <option value="llm">AI only</option>
+          <option value="atif">Atif Assistant only</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button id="save-settings">SAVE</button>
+      </div>
+      <div id="settings-status" class="status"></div>
+    </section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,10 +1,10 @@
-"""Core Jarvis functionality"""
+"""Core Jarvis functionality - notes backed by SQLite."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Any
-import json
-import os
+from typing import Any, Dict, List
+
+from . import db
 
 
 @dataclass
@@ -24,28 +24,18 @@ class Note:
 
 
 class JarvisCore:
-    """Core Jarvis engine"""
+    """Core Jarvis engine for notes."""
 
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = data_dir
-        os.makedirs(data_dir, exist_ok=True)
-        self.notes_file = os.path.join(data_dir, "notes.json")
+    def __init__(self, data_dir: str = None):
+        # Signature kept for backwards compatibility; storage is SQLite now.
+        db.init_db()
 
     def add_note(self, content: str, tags: List[str] = None) -> Note:
         tags = tags or []
         note_id = f"note_{datetime.now().timestamp()}"
         note = Note(id=note_id, content=content, tags=tags)
-        self._save_note(note)
+        db.add_note_db(note_id, content, tags, note.created_at.strftime("%Y-%m-%dT%H:%M:%S"))
         return note
 
-    def _save_note(self, note: Note):
-        notes = self._load_notes()
-        notes.append(note.to_dict())
-        with open(self.notes_file, "w") as f:
-            json.dump(notes, f, indent=2)
-
-    def _load_notes(self) -> List[Dict[str, Any]]:
-        if not os.path.exists(self.notes_file):
-            return []
-        with open(self.notes_file, "r") as f:
-            return json.load(f)
+    def list_notes(self) -> List[Dict[str, Any]]:
+        return db.get_notes_db()
