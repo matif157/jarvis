@@ -65,3 +65,11 @@ def weather():
     w = Weather()
     info = w.get_weather()
     console.print(f"[blue]🌤️[/blue] Weather in {info['location']}: {info['temperature']}°C, {info['condition']}")
+
+
+@cli.command()
+def chat():
+    """Start interactive chat with Jarvis"""
+    from .assistant import Assistant
+    assistant = Assistant()
+    assistant.start()
