@@ -56,3 +56,12 @@ def task():
     tm = TaskManager()
     task = tm.add_task(title)
     console.print(f"[green]✓[/green] Task created: {task.title}")
+
+
+@cli.command()
+def weather():
+    """Get weather info"""
+    from .weather import Weather
+    w = Weather()
+    info = w.get_weather()
+    console.print(f"[blue]🌤️[/blue] Weather in {info['location']}: {info['temperature']}°C, {info['condition']}")
