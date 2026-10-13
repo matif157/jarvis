@@ -220,7 +220,7 @@ class Assistant:
             from . import memory_enhanced
 
             mem = memory_enhanced.EnhancedMemory()
-            facts = mem.search(query, limit=3)
+            facts = mem.search(query, session=self.session, limit=3)
             ctx = []
             for f in facts:
                 ctx.append(
