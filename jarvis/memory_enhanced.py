@@ -13,10 +13,15 @@ class EnhancedMemory:
         self.db = db
 
     def remember_fact(self, key: str, value: str, session: str = "global") -> None:
-        self.db.save_memory(session, key, value)
+        self.db.remember_db(f"{session}:{key}", value)
 
     def get_facts(self, session: str = "global", limit: int = 20) -> List[dict]:
-        return self.db.get_memories(session=session, limit=limit)
+        allm = self.db.get_all_memory_db()
+        results = []
+        for k, v in allm.items():
+            if k.startswith(f"{session}:"):
+                results.append({"key": k.replace(f"{session}:", ""), "value": str(v)})
+        return results[:limit]
 
     def summarize_conversation(self, history: List[dict]) -> Optional[str]:
         if len(history) < 6:
@@ -28,7 +33,12 @@ class EnhancedMemory:
         return f"Recent: {' | '.join(texts)}"
 
     def search(self, query: str, session: str = "global", limit: int = 10) -> List[dict]:
-        results = self.db.get_memories(session=session, limit=limit)
+        allm = self.db.get_all_memory_db()
+        results = []
+        for k,v in allm.items():
+            if k.startswith(f"{session}:"):
+                results.append({"key": k.replace(f"{session}:", ""), "value": str(v)})
+        return results[:limit]
         q = query.lower()
         return [r for r in results if q in r.get("key", "").lower() or q in r.get("value", "").lower()]
 
@@ -36,4 +46,4 @@ class EnhancedMemory:
 def store_summary(session: str, summary: str) -> None:
     from . import db
 
-    db.save_memory(session, "_summary", summary)
+    db.remember_db(f"{session}:_summary", summary)
