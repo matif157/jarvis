@@ -68,6 +68,8 @@ class Assistant:
 
     async def llm_respond(self, query: str) -> tuple:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # add relevant memories
+        messages.extend(self._get_context_memories(query))
         # include last few turns
         for h in self.history[-8:]:
             messages.append(h)
@@ -199,3 +201,21 @@ class Assistant:
                 print("\nGoodbye!")
                 self.is_active = False
                 break
+
+    def _get_context_memories(self, query: str) -> list:
+        try:
+            from . import memory_enhanced
+
+            mem = memory_enhanced.EnhancedMemory()
+            facts = mem.search(query, limit=3)
+            ctx = []
+            for f in facts:
+                ctx.append(
+                    {
+                        "role": "system",
+                        "content": f"Memory: {f.get('key')} = {f.get('value')}",
+                    }
+                )
+            return ctx
+        except Exception:
+            return []
