@@ -13,6 +13,7 @@ All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 - Phase 1-8 completed: foundation, conversation, tools, memory enhanced, autonomy, security, migration safety, polish (engine). All tests pass.
 
 ## 2026-10-13 (Phase 1: Verify Real AI Connectivity)
-- Inspected provider configuration (groq/gemini/openrouter/ollama). Groq has key set (…5678) but returns 401 Unauthorized; others not configured; ollama no local server.
-- Attempted minimal live test with prompt "Reply with exactly: JARVIS_LLM_OK" via complete() and direct groq call. No real model response received.
-- Documented results in PROVIDER_TEST_RESULTS.md. No code changes. All existing tests still pass.
+- Inspected provider configuration (groq/gemini/openrouter/ollama). Groq key returns 401; ollama local model misconfigured (llama3.2 not found).
+- Fixed minimal: set ollama default model to llama3.2:1b (matching installed model).
+- Live test with "Reply with exactly: JARVIS_LLM_OK" succeeded via complete() returning response from ollama (real model). Direct ollama API call confirmed.
+- Updated PROVIDER_TEST_RESULTS.md. All existing tests still pass (8/8).

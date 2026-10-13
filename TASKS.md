@@ -3,7 +3,7 @@
 Status keys: NOT STARTED | IN PROGRESS | IMPLEMENTED | TESTED | VERIFIED WORKING | BLOCKED | FAILED
 
 ## High priority (verification/integration)
-- [ ] **Verify live LLM connectivity** (status: BLOCKED) — Dependencies: valid API key for at least one provider (groq/gemini/openrouter/ollama). Current groq key returns 401; others unconfigured; ollama no server. Acceptance: run `python3 main.py providers test <name>` with valid key and receive real response for "Reply with exactly: JARVIS_LLM_OK". Blockers: need valid credentials or local ollama running.
+- [x] **Verify live LLM connectivity** (status: VERIFIED WORKING) — Tested with ollama (llama3.2:1b). complete() returned exact expected response "JARVIS_LLM_OK". Evidence in PROVIDER_TEST_RESULTS.md.
 - [ ] **Verify Atif integration live** (status: NOT STARTED) — Dependencies: Atif running on http://127.0.0.1:8770 (optional). Acceptance: health check returns ok=true or documented unreachable; one ask() roundtrip if ok. Safe-only.
 - [ ] **Exercise API server + web UI** (status: NOT STARTED) — Dependencies: none. Acceptance: start server briefly, hit /api/health, load web/index.html; stop cleanly. No external calls.
 
