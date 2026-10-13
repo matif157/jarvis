@@ -94,18 +94,34 @@ class Assistant:
 
     async def respond(self, query: str) -> tuple:
         """Route a query and return (text, provider, tool)."""
-        if self.mode in ("auto", "atif"):
+        if self.mode == "auto":
+            # Local-first: try LLM/router before Atif
+            decision = await self.router.route(
+                query,
+                history=self.history[-8:],
+                context=self._get_context_memories(query),
+            )
+            if decision.get("kind") in ("chat", "tool") and decision.get("text"):
+                text = decision["text"]
+                self._record(query, text)
+                return text, decision.get("provider") or "llm", decision.get("tool")
+            # Fallback to Atif if LLM/router didn't produce usable result
             res = await self.atif_respond(query)
             if res[0]:
                 self._record(query, res[0])
                 return res[0], "atif", None
-            if self.mode == "atif":
-                text = (
-                    f"Atif unreachable ({res[1]}). Falling back...\n\n"
-                    f"{self.basic_respond(query)}"
-                )
-                self._record(query, text)
-                return text, "basic", None
+            text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+            self._record(query, text)
+            return text, "basic", None
+
+        if self.mode == "atif":
+            res = await self.atif_respond(query)
+            if res[0]:
+                self._record(query, res[0])
+                return res[0], "atif", None
+            text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+            self._record(query, text)
+            return text, "basic", None
 
         if self.mode in ("auto", "llm"):
             decision = await self.router.route(
@@ -122,7 +138,7 @@ class Assistant:
                 self._record(query, text)
                 return text, "basic", None
 
-        text = self.basic_respond_enhanced(query)
+        text = self.basic_respond(query)
         self._record(query, text)
         return text, "basic", None
 
@@ -134,53 +150,6 @@ class Assistant:
             db.save_message(self.session, "assistant", answer)
         except Exception:
             pass
-
-    def start(self) -> None:
-        self.is_active = True
-        print(self.greet())
-        print(f"Mode: {self.mode}. Type 'exit' to quit.\n")
-
-        while self.is_active:
-            try:
-                user_input = input("> ").strip()
-                if not user_input:
-                    continue
-                if user_input.lower() in ("exit", "quit", "bye", "q"):
-                    print("Goodbye!")
-                    self.is_active = False
-                    break
-                response = asyncio.run(self.answer(user_input))
-                print(response)
-            except (KeyboardInterrupt, EOFError):
-                print("\nGoodbye!")
-                self.is_active = False
-                break
-
-    def basic_respond_enhanced(self, query: str) -> str:
-        from . import nlu
-
-        cls = nlu.classify_intent(query)
-        intent = cls.get("intent")
-        if intent == "time":
-            return f"The current time is {datetime.now().strftime('%I:%M %p')}"
-        if intent == "date":
-            return f"Today is {datetime.now().strftime('%A, %B %d, %Y')}"
-        if intent == "greet":
-            return self.greet()
-        if intent == "help":
-            return "I can help with notes, tasks, time/date, weather, and more. Describe what you want - I'll figure it out."
-        if intent == "note":
-            return "To save a note: 'python3 main.py note'"
-        if intent == "task":
-            return "To create a task: 'python3 main.py task'"
-        if intent == "weather":
-            from .weather import Weather
-
-            info = Weather().get_weather()
-            return f"Weather: {info['temperature']}°C, {info['condition']}"
-        if intent == "find":
-            return "I can help find files - I'll search authorized locations."
-        return self.basic_respond(query)
 
     async def answer_with_tools(self, query: str) -> str:
         """Route a query: LLM router first, NLU shortcuts only in basic mode."""

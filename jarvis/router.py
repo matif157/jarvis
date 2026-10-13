@@ -37,17 +37,28 @@ def parse_decision(text: str) -> Optional[Dict[str, Any]]:
     if not text:
         return None
     cleaned = text.strip()
+    # remove fences
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
+    # try first brace match
     match = _JSON_OBJECT.search(cleaned)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except (ValueError, TypeError):
-        return None
-    return data if isinstance(data, dict) else None
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    # try to fix common trailing brace issues
+    for cand in (cleaned, cleaned.rstrip('}'), cleaned + '}'):
+        try:
+            data = json.loads(cand)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return None
 
 
 class Router:
@@ -81,10 +92,15 @@ class Router:
                 args = {}
             if self.registry.get(name) is None:
                 logger.info("router picked unknown tool: %s", name)
-                return {"kind": "chat", "text": decision.get("reply") or text, "provider": used}
+                return {"kind": "chat", "text": str(decision.get("reply") or text).strip(), "provider": used}
             res = self.registry.execute(name, confirm=False, **args)
             return {"kind": "tool", "tool": name, "args": args, "result": res.to_dict(), "text": self._summarise(name, res), "provider": used}
-        reply = (decision or {}).get("reply") or text
+        reply = (decision or {}).get("reply") if decision else None
+        if not reply:
+            # if LLM just returned text, use it as-is
+            reply = text
+        # strip trailing/extra braces if any oddity
+        reply = str(reply).strip()
         return {"kind": "chat", "text": reply, "provider": used}
 
     @staticmethod
