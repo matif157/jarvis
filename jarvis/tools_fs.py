@@ -27,6 +27,9 @@ class ListFilesTool(Tool):
     def run(self, directory: str = ".", **kwargs) -> ToolResult:
         try:
             p = _expand(directory)
+            from . import security
+            if not security.is_path_safe(str(p)):
+                return ToolResult(success=False, error="path not allowed by security policy", tool=self.name)
             if not p.exists() or not p.is_dir():
                 return ToolResult(success=False, error="not a directory", tool=self.name)
             items = []
@@ -45,6 +48,9 @@ class ReadFileTool(Tool):
     def run(self, path: str = "", max_chars: int = 4000, **kwargs) -> ToolResult:
         try:
             p = _expand(path)
+            from . import security
+            if not security.is_path_safe(str(p)):
+                return ToolResult(success=False, error="path not allowed by security policy", tool=self.name)
             if not p.exists() or not p.is_file():
                 return ToolResult(success=False, error="not a file", tool=self.name)
             try:
