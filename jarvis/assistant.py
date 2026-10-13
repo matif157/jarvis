@@ -28,7 +28,8 @@ class Assistant:
         self.mode = mode  # auto | basic | llm | atif
         self.session = f"cli-{int(datetime.now().timestamp())}"
         self.history: list = []
-        self.registry = get_default_registry()
+        from .tools import get_enhanced_registry
+        self.registry = get_enhanced_registry()
 
     def greet(self) -> str:
         hour = datetime.now().hour
@@ -159,3 +160,42 @@ class Assistant:
         if intent == "find":
             return "I can help find files - I'll search authorized locations."
         return self.basic_respond(query)
+
+    async def answer_with_tools(self, query: str) -> str:
+        """Simple tool selection based on intent."""
+        from . import nlu
+
+        cls = nlu.classify_intent(query)
+        intent = cls.get("intent")
+        if intent == "time":
+            res = self.registry.execute("time.now", confirm=False)
+            if res.success:
+                return f"Current time: {res.result}"
+        if intent == "find":
+            # list common dirs
+            res = self.registry.execute("fs.list", confirm=False, directory="~/Downloads")
+            if res.success and res.result:
+                return f"Found in Downloads (first few): {[x['name'] for x in res.result[:5]]}"
+        return await self.answer(query)
+
+    def start(self) -> None:
+        self.is_active = True
+        print(self.greet())
+        print(f"Mode: {self.mode}. Type 'exit' to quit.\n")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        while self.is_active:
+            try:
+                user_input = input("> ").strip()
+                if not user_input:
+                    continue
+                if user_input.lower() in ("exit", "quit", "bye", "q"):
+                    print("Goodbye!")
+                    self.is_active = False
+                    break
+                response = loop.run_until_complete(self.answer_with_tools(user_input))
+                print(response)
+            except (KeyboardInterrupt, EOFError):
+                print("\nGoodbye!")
+                self.is_active = False
+                break

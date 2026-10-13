@@ -144,3 +144,15 @@ def get_default_registry() -> ToolRegistry:
     reg = ToolRegistry()
     _register_defaults(reg)
     return reg
+
+
+def get_enhanced_registry() -> ToolRegistry:
+    reg = get_default_registry()
+    try:
+        from . import tools_fs
+
+        reg.register(tools_fs.ListFilesTool())
+        reg.register(tools_fs.ReadFileTool())
+    except Exception:
+        pass
+    return reg
