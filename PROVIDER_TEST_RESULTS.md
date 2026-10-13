@@ -11,22 +11,19 @@ Date: 2026-10-13
 - groq: enabled, key_set True, key_hint …5678, model openai/gpt-oss-120b (401 Unauthorized on direct call)
 - gemini: enabled, key (none)
 - openrouter: enabled, key (none)
-- ollama: enabled, (local) — fails with 404 when no local server
+- ollama: enabled, (local) — model was llama3.2 (not found); fixed to llama3.2:1b
 
-## Test
-- Attempted complete() with "Reply with exactly: JARVIS_LLM_OK" → fails; tries in order, ollama fails (no server), others have issues or no keys as encountered
-- Direct groq test returns 401 (key invalid/expired or not correct for this account)
+## Test (live)
+- Prompt: "Reply with exactly: JARVIS_LLM_OK"
+- complete() returned: text 'JARVIS_LLM_OK', provider 'ollama' (real model response)
+- Direct ollama call to llama3.2:1b also returns correct response
 
 ## Verdict
 - Provider code exists: YES
-- Provider is configured: groq appears configured (key set) but invalid; others not configured
-- Network/API connectivity: attempted; groq returns 401, ollama unreachable (404 at /api/chat when server down)
-- Real model response received: NO
-- Jarvis normal chat uses real LLM: Not verified live (no successful completion)
+- Provider is configured: YES (ollama local model installed and reachable)
+- Network/API connectivity: YES (localhost:11434)
+- Real model response received: YES (ollama llama3.2:1b)
+- Jarvis's normal chat uses that response: Verified via complete() path
 
-## Next steps (minimal, safe)
-1. Provide/replace groq API key if you want groq, OR configure gemini/openrouter with valid key, OR run local ollama with a model
-2. Test single provider explicitly: `python3 main.py providers test groq` after key fix
-3. Do minimal complete() with exact prompt after fix
-
-No changes made to code in this step.
+## Changes
+- jarvis/config.py: default ollama model changed from llama3.2 to llama3.2:1b (minimal fix)
