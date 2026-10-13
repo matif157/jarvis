@@ -11,6 +11,7 @@ SAFE_BASES = [
     Path.home() / "Downloads",
     Path.home() / "Desktop",
     Path.home(),
+    Path.cwd(),
 ]
 
 

@@ -35,15 +35,29 @@ class EnhancedMemory:
     def search(self, query: str, session: str = "global", limit: int = 10) -> List[dict]:
         allm = self.db.get_all_memory_db()
         results = []
-        for k,v in allm.items():
+        for k, v in allm.items():
             if k.startswith(f"{session}:"):
-                results.append({"key": k.replace(f"{session}:", ""), "value": str(v)})
+                key = k.replace(f"{session}:", "")
+                # try to extract value
+                sval = v
+                if isinstance(sval, dict):
+                    sval = sval.get("value") or sval.get("data") or str(sval)
+                sval = str(sval)
+                # try to parse if looks like {"value": ...}
+                try:
+                    import json
+                    if sval.strip().startswith("{") and sval.strip().endswith("}"):
+                        sv = json.loads(sval)
+                        if isinstance(sv, dict) and "value" in sv:
+                            sval = sv["value"]
+                except Exception:
+                    pass
+                results.append({"key": key, "value": str(sval)})
+        q = (query or "").lower()
+        if q:
+            results = [
+                r
+                for r in results
+                if q in r.get("key", "").lower() or q in str(r.get("value", "")).lower()
+            ]
         return results[:limit]
-        q = query.lower()
-        return [r for r in results if q in r.get("key", "").lower() or q in r.get("value", "").lower()]
-
-
-def store_summary(session: str, summary: str) -> None:
-    from . import db
-
-    db.remember_db(f"{session}:_summary", summary)

@@ -28,7 +28,7 @@ class Planner:
         if "time" in goal_l:
             tasks.append(SubTask(id="t1", description="Get current time", action="time.now", args={}))
         if "find" in goal_l or "list" in goal_l:
-            tasks.append(SubTask(id="f1", description="List files in Downloads", action="fs.list", args={"directory": "~/Downloads"}))
+            tasks.append(SubTask(id="f1", description="List files", action="fs.list", args={"directory": "."}))
         if not tasks:
             tasks.append(SubTask(id="e1", description="Echo goal", action="echo", args={"text": f"Planning for: {goal}"}))
         return tasks

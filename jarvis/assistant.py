@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Optional
 
 from . import atif_client, db, llm
+from .action_loop import ActionLoop
+from .router import Router
 from .tools import get_default_registry
 
 SYSTEM_PROMPT = (
@@ -30,6 +32,8 @@ class Assistant:
         self.history: list = []
         from .tools import get_enhanced_registry
         self.registry = get_enhanced_registry()
+        self.router = Router(registry=self.registry)
+        self.action_loop = ActionLoop(registry=self.registry, router=self.router, interactive=False)
 
     def greet(self) -> str:
         hour = datetime.now().hour
@@ -87,25 +91,78 @@ class Assistant:
         return None, result.get("error", "atif unreachable")
 
     async def answer(self, query: str) -> str:
-        if self.mode in ("auto", "atif"):
+        text, _provider, _tool = await self.respond(query)
+        return text
+
+    async def respond(self, query: str) -> tuple:
+        """Route a query and return (text, provider, tool)."""
+        if self.mode == "auto":
+            # Local-first: try LLM/router before Atif
+            ctx = self._get_context_memories(query)
+            loop_res = await self.action_loop.run(
+                query,
+                history=self.history[-8:],
+                context=ctx,
+            )
+            if loop_res.get("kind") == "chat" and loop_res.get("text"):
+                text = loop_res["text"]
+                self._record(query, text)
+                return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
+            decision = await self.router.route(
+                query,
+                history=self.history[-8:],
+                context=ctx,
+            )
+            if decision.get("kind") in ("chat", "tool") and decision.get("text"):
+                text = decision["text"]
+                self._record(query, text)
+                return text, decision.get("provider") or "llm", decision.get("tool")
+            # Fallback to Atif if LLM/router didn't produce usable result
             res = await self.atif_respond(query)
             if res[0]:
                 self._record(query, res[0])
-                return res[0]
-            if self.mode == "atif":
-                return f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+                return res[0], "atif", None
+            text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+            self._record(query, text)
+            return text, "basic", None
 
-        if self.mode in ("auto", "llm") and llm.has_provider():
-            res = await self.llm_respond(query)
+        if self.mode == "atif":
+            res = await self.atif_respond(query)
             if res[0]:
                 self._record(query, res[0])
-                return res[0]
-            if self.mode == "llm":
-                return f"AI failed ({res[1]}).\n\n{self.basic_respond(query)}"
+                return res[0], "atif", None
+            text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+            self._record(query, text)
+            return text, "basic", None
 
-        text = self.basic_respond_enhanced(query)
+        if self.mode in ("auto", "llm"):
+            ctx = self._get_context_memories(query)
+            loop_res = await self.action_loop.run(
+                query,
+                history=self.history[-8:],
+                context=ctx,
+            )
+            if loop_res.get("kind") == "chat" and loop_res.get("text"):
+                text = loop_res["text"]
+                self._record(query, text)
+                return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
+            decision = await self.router.route(
+                query,
+                history=self.history[-8:],
+                context=ctx,
+            )
+            if decision.get("kind") in ("chat", "tool") and decision.get("text"):
+                text = decision["text"]
+                self._record(query, text)
+                return text, decision.get("provider") or "llm", decision.get("tool")
+            if self.mode == "llm":
+                text = f"AI failed.\n\n{self.basic_respond(query)}"
+                self._record(query, text)
+                return text, "basic", None
+
+        text = self.basic_respond(query)
         self._record(query, text)
-        return text
+        return text, "basic", None
 
     def _record(self, query: str, answer: str) -> None:
         self.history.append({"role": "user", "content": query})
@@ -116,55 +173,12 @@ class Assistant:
         except Exception:
             pass
 
-    def start(self) -> None:
-        self.is_active = True
-        print(self.greet())
-        print(f"Mode: {self.mode}. Type 'exit' to quit.\n")
-
-        while self.is_active:
-            try:
-                user_input = input("> ").strip()
-                if not user_input:
-                    continue
-                if user_input.lower() in ("exit", "quit", "bye", "q"):
-                    print("Goodbye!")
-                    self.is_active = False
-                    break
-                response = asyncio.run(self.answer(user_input))
-                print(response)
-            except (KeyboardInterrupt, EOFError):
-                print("\nGoodbye!")
-                self.is_active = False
-                break
-
-    def basic_respond_enhanced(self, query: str) -> str:
-        from . import nlu
-
-        cls = nlu.classify_intent(query)
-        intent = cls.get("intent")
-        if intent == "time":
-            return f"The current time is {datetime.now().strftime('%I:%M %p')}"
-        if intent == "date":
-            return f"Today is {datetime.now().strftime('%A, %B %d, %Y')}"
-        if intent == "greet":
-            return self.greet()
-        if intent == "help":
-            return "I can help with notes, tasks, time/date, weather, and more. Describe what you want - I'll figure it out."
-        if intent == "note":
-            return "To save a note: 'python3 main.py note'"
-        if intent == "task":
-            return "To create a task: 'python3 main.py task'"
-        if intent == "weather":
-            from .weather import Weather
-
-            info = Weather().get_weather()
-            return f"Weather: {info['temperature']}°C, {info['condition']}"
-        if intent == "find":
-            return "I can help find files - I'll search authorized locations."
-        return self.basic_respond(query)
-
     async def answer_with_tools(self, query: str) -> str:
-        """Simple tool selection based on intent."""
+        """Route a query: LLM router first, NLU shortcuts only in basic mode."""
+        if self.mode in ("auto", "llm"):
+            text, _provider, _tool = await self.respond(query)
+            return text
+
         from . import nlu
 
         cls = nlu.classify_intent(query)
@@ -174,7 +188,6 @@ class Assistant:
             if res.success:
                 return f"Current time: {res.result}"
         if intent == "find":
-            # list common dirs
             res = self.registry.execute("fs.list", confirm=False, directory="~/Downloads")
             if res.success and res.result:
                 return f"Found in Downloads (first few): {[x['name'] for x in res.result[:5]]}"
@@ -207,7 +220,7 @@ class Assistant:
             from . import memory_enhanced
 
             mem = memory_enhanced.EnhancedMemory()
-            facts = mem.search(query, limit=3)
+            facts = mem.search(query, session=self.session, limit=3)
             ctx = []
             for f in facts:
                 ctx.append(

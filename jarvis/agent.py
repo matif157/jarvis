@@ -25,7 +25,15 @@ class Agent:
         subs = self.planner.decompose(goal)
         steps = [{"tool": s.action, "args": s.args} for s in subs]
         task = self.executor.create_task(goal, steps=steps)
-        self.executor.execute(task.id, confirm_all=auto_confirm)
+        # execute with retries
+        for _ in range(self.max_retries + 1):
+            self.executor.execute(task.id, confirm_all=auto_confirm)
+            task = self.executor.load(task.id)
+            if task.status == "completed":
+                break
+            if task.status == "failed":
+                # retry if steps remain? simple: try once more
+                pass
         task = self.executor.load(task.id)
         return {
             "task_id": task.id,

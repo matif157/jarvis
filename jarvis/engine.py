@@ -22,3 +22,10 @@ class Engine:
         import asyncio
 
         return asyncio.run(self.process(input_text))
+
+    async def answer(self, input_text: str) -> str:
+        return await self.assistant.answer(input_text)
+
+    async def answer_with_tools(self, input_text: str) -> str:
+        return await self.assistant.answer_with_tools(input_text)
+
