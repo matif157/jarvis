@@ -1,0 +1,28 @@
+{
+  "allow": {
+    "file.read": [
+      "Documents/*",
+      "Downloads/*",
+      "Desktop/*",
+      "~/*"
+    ],
+    "file.write": [
+      "Documents/*",
+      "Downloads/*",
+      "Desktop/*",
+      "~/*"
+    ],
+    "file.delete": [],
+    "shell.run": [],
+    "web.search": [
+      "*"
+    ],
+    "email.send": [],
+    "app.open": [
+      "*"
+    ],
+    "system.configure": []
+  },
+  "ask_first": [],
+  "deny": []
+}

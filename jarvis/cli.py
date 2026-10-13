@@ -302,3 +302,45 @@ def migrate(remove_json):
 
 if __name__ == "__main__":
     cli()
+
+
+@cli.command()
+def tools():
+    """List available tools."""
+    from .tools import get_default_registry
+
+    reg = get_default_registry()
+    for t in reg.list_tools():
+        console.print(f"[cyan]{t['name']}[/cyan]: {t['description']}")
+
+
+@cli.command()
+@click.option("--confirm", is_flag=True, help="Auto-confirm confirmation-required actions")
+def plan():
+    """Simple planner/demo."""
+    from .engine_tasks import TaskExecutor
+
+    executor = TaskExecutor()
+    task = executor.create_task("Demo task", steps=[{"tool": "time.now", "args": {}}])
+    console.print(f"Created task {task.id}")
+    executor.execute(task.id, confirm_all=confirm)
+
+
+@cli.command()
+@click.argument("task_id")
+def resume(task_id):
+    """Resume/inspect a stored task."""
+    from .engine_tasks import TaskExecutor
+
+    executor = TaskExecutor()
+    task = executor.load(task_id)
+    if not task:
+        console.print(f"[red]Task not found[/red]: {task_id}")
+        return
+    console.print(json_dumps({"id": task.id, "goal": task.goal, "status": task.status, "steps": len(task.steps)}))
+
+
+def json_dumps(obj):
+    import json
+
+    return json.dumps(obj, indent=2)

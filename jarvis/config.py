@@ -60,3 +60,17 @@ def get_config_dir() -> str:
 
 def get_web_dir() -> str:
     return str(WEB_DIR)
+
+
+def validate_config() -> None:
+    """Basic sanity checks for configuration."""
+    data_dir = Path(DATA_DIR)
+    if not data_dir.exists() or not data_dir.is_dir():
+        data_dir.mkdir(parents=True, exist_ok=True)
+    cfg_dir = Path(CONFIG_DIR)
+    if not cfg_dir.exists() or not cfg_dir.is_dir():
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+    web_dir = Path(WEB_DIR)
+    if not web_dir.exists():
+        # Not fatal, web UI might not be needed.
+        pass
