@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from . import atif_client, db, llm
+from .action_loop import ActionLoop
 from .router import Router
 from .tools import get_default_registry
 
@@ -32,6 +33,7 @@ class Assistant:
         from .tools import get_enhanced_registry
         self.registry = get_enhanced_registry()
         self.router = Router(registry=self.registry)
+        self.action_loop = ActionLoop(registry=self.registry, router=self.router, interactive=False)
 
     def greet(self) -> str:
         hour = datetime.now().hour
@@ -96,10 +98,20 @@ class Assistant:
         """Route a query and return (text, provider, tool)."""
         if self.mode == "auto":
             # Local-first: try LLM/router before Atif
+            ctx = self._get_context_memories(query)
+            loop_res = await self.action_loop.run(
+                query,
+                history=self.history[-8:],
+                context=ctx,
+            )
+            if loop_res.get("kind") == "chat" and loop_res.get("text"):
+                text = loop_res["text"]
+                self._record(query, text)
+                return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
             decision = await self.router.route(
                 query,
                 history=self.history[-8:],
-                context=self._get_context_memories(query),
+                context=ctx,
             )
             if decision.get("kind") in ("chat", "tool") and decision.get("text"):
                 text = decision["text"]
@@ -124,10 +136,20 @@ class Assistant:
             return text, "basic", None
 
         if self.mode in ("auto", "llm"):
+            ctx = self._get_context_memories(query)
+            loop_res = await self.action_loop.run(
+                query,
+                history=self.history[-8:],
+                context=ctx,
+            )
+            if loop_res.get("kind") == "chat" and loop_res.get("text"):
+                text = loop_res["text"]
+                self._record(query, text)
+                return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
             decision = await self.router.route(
                 query,
                 history=self.history[-8:],
-                context=self._get_context_memories(query),
+                context=ctx,
             )
             if decision.get("kind") in ("chat", "tool") and decision.get("text"):
                 text = decision["text"]
