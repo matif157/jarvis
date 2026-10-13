@@ -1,0 +1,2 @@
+# Development/test only. Runtime deps remain in requirements.txt.
+pytest>=8.0

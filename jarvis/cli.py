@@ -33,7 +33,8 @@ def status():
     console.print("[green]OK[/green] Jarvis is running locally")
     console.print("[blue]Data[/blue] stored in local SQLite database")
     console.print(f"[blue]AI providers[/blue] configured: {llm.has_provider()}")
-    console.print(f"[blue]Default mode[/blue] {'llm' if llm.has_provider() else 'basic'}")
+    active = asyncio.run(llm.active_provider())
+    console.print(f"[blue]Active provider[/blue] {active or '(none, using basics)'}")
 
 
 @cli.command()

@@ -11,7 +11,7 @@ chat:
 	python3 main.py chat
 
 test:
-	python3 -m pytest -v 2>/dev/null || python3 -c "from jarvis import __version__; print('Jarvis v', __version__, 'OK')"
+	python3 -m pytest -v tests/ 2>/dev/null || python3 -c "from jarvis import __version__; print('Jarvis v', __version__, 'OK')"
 
 clean:
 	rm -rf __pycache__ jarvis/__pycache__ tests/__pycache__ build/ dist/ *.egg-info

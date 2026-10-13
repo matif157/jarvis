@@ -404,3 +404,20 @@ async def test_provider(
             "error": f"{type(exc).__name__}: {str(exc)[:120]}",
             "latency_ms": int((time.monotonic() - started) * 1000),
         }
+
+
+async def active_provider(prefer: Optional[str] = None) -> Optional[str]:
+    """The first enabled provider that is actually usable right now."""
+    order = list(PROVIDER_ORDER)
+    if prefer and prefer in order:
+        order = [prefer] + [p for p in order if p != prefer]
+    for name in order:
+        if not provider_enabled(name) or name not in HANDLERS:
+            continue
+        if name == "ollama":
+            if await ollama_is_up():
+                return name
+            continue
+        if provider_key(name):
+            return name
+    return None

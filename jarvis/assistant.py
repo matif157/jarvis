@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from . import atif_client, db, llm
+from .router import Router
 from .tools import get_default_registry
 
 SYSTEM_PROMPT = (
@@ -30,6 +31,7 @@ class Assistant:
         self.history: list = []
         from .tools import get_enhanced_registry
         self.registry = get_enhanced_registry()
+        self.router = Router(registry=self.registry)
 
     def greet(self) -> str:
         hour = datetime.now().hour
@@ -87,25 +89,42 @@ class Assistant:
         return None, result.get("error", "atif unreachable")
 
     async def answer(self, query: str) -> str:
+        text, _provider, _tool = await self.respond(query)
+        return text
+
+    async def respond(self, query: str) -> tuple:
+        """Route a query and return (text, provider, tool)."""
         if self.mode in ("auto", "atif"):
             res = await self.atif_respond(query)
             if res[0]:
                 self._record(query, res[0])
-                return res[0]
+                return res[0], "atif", None
             if self.mode == "atif":
-                return f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+                text = (
+                    f"Atif unreachable ({res[1]}). Falling back...\n\n"
+                    f"{self.basic_respond(query)}"
+                )
+                self._record(query, text)
+                return text, "basic", None
 
-        if self.mode in ("auto", "llm") and llm.has_provider():
-            res = await self.llm_respond(query)
-            if res[0]:
-                self._record(query, res[0])
-                return res[0]
+        if self.mode in ("auto", "llm"):
+            decision = await self.router.route(
+                query,
+                history=self.history[-8:],
+                context=self._get_context_memories(query),
+            )
+            if decision.get("kind") in ("chat", "tool") and decision.get("text"):
+                text = decision["text"]
+                self._record(query, text)
+                return text, decision.get("provider") or "llm", decision.get("tool")
             if self.mode == "llm":
-                return f"AI failed ({res[1]}).\n\n{self.basic_respond(query)}"
+                text = f"AI failed.\n\n{self.basic_respond(query)}"
+                self._record(query, text)
+                return text, "basic", None
 
         text = self.basic_respond_enhanced(query)
         self._record(query, text)
-        return text
+        return text, "basic", None
 
     def _record(self, query: str, answer: str) -> None:
         self.history.append({"role": "user", "content": query})
@@ -164,7 +183,11 @@ class Assistant:
         return self.basic_respond(query)
 
     async def answer_with_tools(self, query: str) -> str:
-        """Simple tool selection based on intent."""
+        """Route a query: LLM router first, NLU shortcuts only in basic mode."""
+        if self.mode in ("auto", "llm"):
+            text, _provider, _tool = await self.respond(query)
+            return text
+
         from . import nlu
 
         cls = nlu.classify_intent(query)
@@ -174,7 +197,6 @@ class Assistant:
             if res.success:
                 return f"Current time: {res.result}"
         if intent == "find":
-            # list common dirs
             res = self.registry.execute("fs.list", confirm=False, directory="~/Downloads")
             if res.success and res.result:
                 return f"Found in Downloads (first few): {[x['name'] for x in res.result[:5]]}"
