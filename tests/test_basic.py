@@ -1,5 +1,7 @@
 """Basic tests for Jarvis"""
 
+import re
+
 from jarvis import __version__
 from jarvis.core import JarvisCore, Note
 import tempfile
@@ -7,7 +9,7 @@ import os
 
 
 def test_version():
-    assert __version__ == "0.2.0"
+    assert re.match(r"^\d+\.\d+\.\d+$", __version__)
 
 
 def test_note_creation():

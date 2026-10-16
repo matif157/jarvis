@@ -1,18 +1,39 @@
-.PHONY: install run test chat clean
+.PHONY: install install-dev run serve test test-pytest lint build clean dist clean-dist
 
 install:
 	pip install -r requirements.txt
 	pip install -e .
 
+install-dev: install
+	pip install -r requirements-dev.txt
+
 run:
 	python3 main.py status
+
+serve:
+	python3 main.py serve
 
 chat:
 	python3 main.py chat
 
+# Dependency-free test runner (works without pytest).
 test:
-	python3 -m pytest -v tests/ 2>/dev/null || python3 -c "from jarvis import __version__; print('Jarvis v', __version__, 'OK')"
+	python3 scripts/run_tests.py
 
-clean:
-	rm -rf __pycache__ jarvis/__pycache__ tests/__pycache__ build/ dist/ *.egg-info
-	rm -rf data/*.json
+# Run the same suite via pytest when installed.
+test-pytest:
+	python3 -m pytest -q tests/
+
+# Byte-compile everything to catch syntax errors across the tree.
+lint:
+	python3 -m compileall -q jarvis scripts tests main.py
+
+build dist:
+	python3 -m build
+
+clean: clean-dist
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	rm -rf build/ dist/ *.egg-info .pytest_cache
+
+clean-dist:
+	rm -rf build/ dist/ *.egg-info

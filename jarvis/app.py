@@ -12,18 +12,31 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import db, llm
-from .config import PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
+from . import __version__
+from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
+from .tools import get_enhanced_registry
 
-app = FastAPI(title="Jarvis", version="0.1.0")
+app = FastAPI(title="Jarvis", version=__version__)
 
 
 class Ask(BaseModel):
     question: str
     session: Optional[str] = None
     mode: Optional[str] = None
+
+
+class ChatIn(BaseModel):
+    message: str
+    session: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class ToolExec(BaseModel):
+    params: dict = Field(default_factory=dict)
+    confirm: bool = False
 
 
 class ProviderIn(BaseModel):
@@ -40,13 +53,82 @@ def _startup() -> None:
 
 
 @app.get("/api/health")
-async def health() -> dict:
-    providers = await llm.probe_providers()
+async def health(probe: bool = True) -> dict:
+    providers = await llm.probe_providers() if probe else []
     return {
         "ok": True,
         "app": "jarvis",
         "providers": providers,
         "has_provider": llm.has_provider(),
+    }
+
+
+@app.get("/api/status")
+def status() -> dict:
+    """Server snapshot: tool count and subsystem availability (no network)."""
+    try:
+        tools = get_enhanced_registry().list_tools()
+        tool_count = len(tools)
+    except Exception:
+        tool_count = 0
+    try:
+        from .voice import VoiceManager
+
+        voice = VoiceManager().status()
+    except Exception:
+        voice = {"tts": {"available": False}, "stt": {"available": False}}
+    return {
+        "ok": True,
+        "app": "jarvis",
+        "version": app.version,
+        "tools": tool_count,
+        "has_provider": llm.has_provider(),
+        "voice": voice,
+        "host": HOST,
+        "port": PORT,
+    }
+
+
+@app.get("/api/tools")
+def list_tools() -> dict:
+    """List every registered tool with its description and permissions."""
+    tools = get_enhanced_registry().list_tools()
+    return {"count": len(tools), "tools": tools}
+
+
+@app.post("/api/tools/{name}")
+def run_tool(name: str, payload: ToolExec = ToolExec()) -> JSONResponse:
+    """Execute a registered tool by name.
+
+    Confirmation-gated permissions (e.g. ``email.send``, ``voice.listen``)
+    require ``confirm: true`` in the body; otherwise the tool reports that
+    confirmation is required instead of running.
+    """
+    registry = get_enhanced_registry()
+    if registry.get(name) is None:
+        return JSONResponse(
+            {"success": False, "error": f"unknown tool: {name}", "tool": name},
+            status_code=404,
+        )
+    result = registry.execute(name, confirm=payload.confirm, **(payload.params or {}))
+    return JSONResponse(result.to_dict())
+
+
+@app.post("/api/chat")
+async def chat(payload: ChatIn) -> dict:
+    """Chat with the assistant, returning which provider/tool answered."""
+    from .assistant import Assistant
+
+    assistant = Assistant(mode=payload.mode or "auto")
+    if payload.session:
+        assistant.session = payload.session
+    text, provider, tool = await assistant.respond(payload.message)
+    return {
+        "text": text,
+        "provider": provider,
+        "tool": tool,
+        "session": assistant.session,
+        "mode": assistant.mode,
     }
 
 

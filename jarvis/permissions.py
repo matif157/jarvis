@@ -20,6 +20,21 @@ DEFAULT_ALLOWLIST = {
     "email.send": [],
     "app.open": ["*"],
     "system.configure": [],
+    "job.read": ["*"],
+    "job.write": ["*"],
+    "job.apply": [],
+    "voice.read": ["*"],
+    "voice.speak": ["*"],
+    "voice.listen": [],
+    "workflow.read": ["*"],
+    "workflow.write": ["*"],
+    "workflow.run": [],
+    "atif.read": ["*"],
+    "atif.ask": ["*"],
+    "atif.config": ["*"],
+    "iot.read": ["*"],
+    "iot.write": ["*"],
+    "iot.control": [],
 }
 
 
@@ -70,7 +85,7 @@ class PermissionManager:
         if action in self.ask_first:
             return True
         # Destructive defaults
-        if action in ("file.delete", "system.configure", "email.send"):
+        if action in ("file.delete", "system.configure", "email.send", "job.apply", "voice.listen", "workflow.run", "iot.control"):
             return True
         return False
 

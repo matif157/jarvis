@@ -301,10 +301,6 @@ def migrate(remove_json):
     )
 
 
-if __name__ == "__main__":
-    cli()
-
-
 @cli.command()
 def tools():
     """List available tools."""
@@ -345,3 +341,198 @@ def json_dumps(obj):
     import json
 
     return json.dumps(obj, indent=2)
+
+
+# ----------------------------------------------------------- workflows
+
+
+@cli.group()
+def workflow():
+    """Create and run resumable workflows."""
+    pass
+
+
+@workflow.command("list")
+@click.option("--status", default="", help="Filter by status")
+def workflow_list(status):
+    """List stored workflows."""
+    from .workflows import WorkflowEngine
+
+    items = WorkflowEngine().list(status=status or None)
+    table = Table(title="Workflows")
+    table.add_column("id", style="cyan")
+    table.add_column("name")
+    table.add_column("status")
+    table.add_column("steps")
+    for wf in items:
+        table.add_row(wf.id, wf.name, wf.status, str(len(wf.steps)))
+    console.print(table)
+
+
+@workflow.command("show")
+@click.argument("workflow_id")
+def workflow_show(workflow_id):
+    """Show a workflow's full state."""
+    from .workflows import WorkflowEngine
+
+    wf = WorkflowEngine().get(workflow_id)
+    if not wf:
+        console.print(f"[red]Workflow not found[/red]: {workflow_id}")
+        return
+    console.print_json(json_dumps(__import__("dataclasses").asdict(wf)))
+
+
+@workflow.command("create")
+@click.argument("name")
+@click.option("--step", "step_specs", multiple=True, help="TOOL[:k=v,...] step (repeatable)")
+@click.option("--goal", default="", help="Goal description")
+def workflow_create(name, step_specs, goal):
+    """Create a workflow from one or more --step specs."""
+    import json as _json
+
+    from .workflows import WorkflowEngine
+
+    steps = []
+    for spec in step_specs:
+        tool, _, args_s = spec.partition(":")
+        args = {}
+        if args_s:
+            try:
+                args = _json.loads(args_s)
+            except Exception:
+                for pair in args_s.split(","):
+                    k, _, v = pair.partition("=")
+                    if k:
+                        args[k] = v
+        steps.append({"tool": tool, "args": args})
+    if not steps:
+        console.print("[red]At least one --step is required[/red]")
+        return
+    wf = WorkflowEngine().create(name=name, steps=steps, goal=goal)
+    console.print(f"Created workflow [cyan]{wf.id}[/cyan] ({len(wf.steps)} steps)")
+
+
+@workflow.command("run")
+@click.argument("workflow_id")
+def workflow_run(workflow_id):
+    """Start a workflow (gated steps will block)."""
+    from .workflows import WorkflowEngine
+
+    try:
+        wf = WorkflowEngine().start(workflow_id, confirm=False)
+    except Exception as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    console.print(json_dumps(wf.summary()))
+
+
+@workflow.command("resume")
+@click.argument("workflow_id")
+@click.option("--confirm", is_flag=True, help="Authorize confirmation-gated steps")
+def workflow_resume(workflow_id, confirm):
+    """Resume a paused/blocked/failed workflow."""
+    from .workflows import WorkflowEngine
+
+    try:
+        wf = WorkflowEngine().resume(workflow_id, confirm=confirm)
+    except Exception as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    console.print(json_dumps(wf.summary()))
+
+
+@workflow.command("cancel")
+@click.argument("workflow_id")
+def workflow_cancel(workflow_id):
+    """Cancel a workflow."""
+    from .workflows import WorkflowEngine
+
+    try:
+        wf = WorkflowEngine().cancel(workflow_id)
+    except Exception as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    console.print(json_dumps(wf.summary()))
+
+
+# --------------------------------------------------------------- iot
+
+
+@cli.group()
+def iot():
+    """List and control optional smart devices."""
+    pass
+
+
+@iot.command("providers")
+def iot_providers():
+    """Show IoT provider availability."""
+    from .iot import IoTManager
+
+    for p in IoTManager().provider_status():
+        state = "[green]available[/green]" if p["available"] else "[dim]unavailable[/dim]"
+        console.print(f"{p['name']}: {state}")
+
+
+@iot.command("list")
+def iot_list():
+    """List registered devices."""
+    from .iot import IoTManager
+
+    table = Table(title="Devices")
+    table.add_column("id", style="cyan")
+    table.add_column("name")
+    table.add_column("provider")
+    table.add_column("kind")
+    table.add_column("state")
+    for d in IoTManager().store.list():
+        table.add_row(d.id, d.name, d.provider, d.kind, json_dumps(d.state))
+    console.print(table)
+
+
+@iot.command("add")
+@click.argument("name")
+@click.option("--provider", default="mock", help="mock|http|home_assistant")
+@click.option("--kind", default="switch")
+@click.option("--address", default="", help="URL (http) or entity_id (home_assistant)")
+def iot_add(name, provider, kind, address):
+    """Register a device."""
+    from .iot import IoTManager
+
+    try:
+        d = IoTManager().add_device(name=name, provider=provider, kind=kind, address=address)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    console.print(f"Added [cyan]{d.id}[/cyan] ({d.provider})")
+
+
+@iot.command("control")
+@click.argument("device_id")
+@click.argument("action")
+@click.option("--value", default=None)
+def iot_control(device_id, action, value):
+    """Control a device (on/off/toggle/set/status)."""
+    from .iot import IoTManager
+
+    result = IoTManager().control(device_id, action, value)
+    if not result.get("ok"):
+        console.print(f"[red]{result.get('error')}[/red]")
+        return
+    console.print(json_dumps(result.get("state", {})))
+
+
+@iot.command("remove")
+@click.argument("device_id")
+def iot_remove(device_id):
+    """Remove a device."""
+    from .iot import DeviceStore
+
+    if DeviceStore().remove(device_id):
+        console.print(f"Removed {device_id}")
+    else:
+        console.print(f"[red]Device not found[/red]: {device_id}")
+
+
+if __name__ == "__main__":
+    cli()

@@ -3,6 +3,14 @@
 import os
 from pathlib import Path
 
+# Load a local .env if python-dotenv is available (optional).
+try:  # pragma: no cover - trivial
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:  # noqa: BLE001
+    pass
+
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("JARVIS_DATA_DIR", BASE_DIR / "data"))

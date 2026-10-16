@@ -3,17 +3,65 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jarvis Settings</title>
+  <title>Jarvis</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div class="wrap">
     <header>
       <strong>JARVIS</strong>
-      <span class="sub">settings</span>
+      <span class="sub" id="status-line">local-first assistant</span>
     </header>
 
-    <section>
+    <nav class="tabs">
+      <button class="tab active" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="tools">Tools</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <!-- CHAT -->
+    <section id="tab-chat" class="panel active">
+      <h2>Chat</h2>
+      <p class="hint">Talk to Jarvis. Uses your configured provider; falls back to offline basics.</p>
+      <div id="chat-log" class="chat-log"></div>
+      <div class="chat-controls">
+        <select id="chat-mode">
+          <option value="auto">Auto</option>
+          <option value="basic">Basic (offline)</option>
+          <option value="llm">AI only</option>
+          <option value="atif">Atif</option>
+        </select>
+        <input id="chat-input" placeholder="Ask Jarvis anything..." autocomplete="off">
+        <button id="chat-send">SEND</button>
+      </div>
+    </section>
+
+    <!-- TOOLS -->
+    <section id="tab-tools" class="panel">
+      <h2>Tools</h2>
+      <p class="hint">Every capability Jarvis can run. Confirmation-gated tools need the "confirm" box checked.</p>
+      <div class="tools-layout">
+        <div id="tools-list" class="tools-list"></div>
+        <div class="tool-runner">
+          <div class="tool-runner-head">
+            <strong id="tool-runner-name">Select a tool</strong>
+          </div>
+          <label>Params (JSON)
+            <textarea id="tool-params" rows="6" placeholder='{"text": "hello"}'></textarea>
+          </label>
+          <label class="inline">
+            <input type="checkbox" id="tool-confirm"> Confirm (for gated tools)
+          </label>
+          <div class="actions">
+            <button id="tool-run" disabled>RUN</button>
+          </div>
+          <pre id="tool-result" class="tool-result"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="panel">
       <h2>Models &amp; API keys</h2>
       <p class="hint">Paste a key, test it, then save. Keys are stored locally and shown masked.</p>
       <div id="providers-list" class="providers"></div>
@@ -21,10 +69,8 @@
         <button id="test-all-providers">TEST ALL</button>
       </div>
       <div id="providers-status" class="status"></div>
-    </section>
 
-    <section>
-      <h2>Preferences</h2>
+      <h2 style="margin-top:32px">Preferences</h2>
       <label>Atif Assistant URL
         <input id="set-atif-url" placeholder="http://127.0.0.1:8770">
       </label>

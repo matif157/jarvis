@@ -7,11 +7,44 @@ Assessment of Jarvis implementation vs claims in reports. All checks run against
 - Phase 1: VERIFIED
 - Phase 2: VERIFIED
 - Phase 3: VERIFIED
+- Task management (create/list/complete/cancel/reopen) via natural language
+- Notes management (add/list/search/read) via natural language
+- Memory operations (remember/recall/list/forget) via existing DB
+- Local file discovery (fs.find) with path restrictions
+- NL integration through LLM router and registered tools
 - Phase 4: VERIFIED
+- Memory save/retrieve/forget/list operations
+- Context injection into LLM prompts
+- Memory correction and deletion
+- Memory export to JSON
+- Edge case handling (duplicates, empty queries, access errors)
 - Phase 5: VERIFIED
 - Phase 6: VERIFIED
 - Phase 7: VERIFIED
 - Phase 8: VERIFIED
+- Phase 9 (Email/Messaging): VERIFIED
+- Email/messaging with consent: IMAP/SMTP client, multi-provider config, search/read/send/list folders
+- OAuth/app-password auth, credential storage, send confirmation gating, 30 acceptance tests
+- Phase 10 (Job Discovery/Application Workflow): VERIFIED
+- Pluggable job discovery (mock + web-search sources), career-profile matching, listing + application stores
+- Application status state machine, cover letter/checklist prep, follow-up email draft/send, job.stats, 42 acceptance tests
+- Phase 11 (Voice): VERIFIED
+- macOS `say` text-to-speech, pluggable/optional speech-to-text (whisper/speech_recognition), mock providers
+- VoiceManager coordination, voice.status/speak/listen/transcribe/voices tools, mic access gated, honest fallback, 28 acceptance tests
+- Phase 12 (API/Web UI): VERIFIED
+- JSON API exposes every registered tool (`/api/tools`, `/api/tools/{name}`), status snapshot (`/api/status`), chat with provider/tool attribution (`/api/chat`)
+- Confirmation-gated tools surfaced honestly over HTTP; web UI gains Chat + Tools tabs alongside Settings; 12 acceptance tests
+- Phase 13 (Resumable Workflows): VERIFIED
+- Persistent multi-step workflows (`data/workflows/*.json`) that survive restarts; start/pause/resume/cancel, per-step retries, optional/continue-on-error, `${...}` result interpolation
+- Confirmation-gated steps block and resume honestly; 9 workflow tools (read/write allowed, `workflow.run` gated); 27 acceptance tests
+- Phase 14 (Atif Bridge / IoT): VERIFIED
+- Atif bridge tools (`atif.status`, `atif.ask`, `atif.set_url`) over sync HTTP; health verified live against a running Atif Assistant on :8770
+- Optional IoT layer (`jarvis/iot.py`): JSON device registry, mock/http/home_assistant providers, control confirmation-gated; 6 IoT tools; 22 acceptance tests
+- Phase 15 (Release Readiness / v1.0.0): VERIFIED
+- Version unified to v1.0.0 across `jarvis/__init__.py`, `setup.py`, and the live API; packaging hardened (`setup.py` metadata, `pyproject.toml`, `MANIFEST.in` shipping web UI + docs, data pruned)
+- MIT `LICENSE` added; `README.md` rewritten; `RELEASE_NOTES.md` + `RELEASING.md` added
+- Dependency-free `scripts/run_tests.py` runner, reworked `Makefile`, and GitHub Actions CI matrix (Python 3.9–3.12)
+- Optional `.env` loading via `python-dotenv` + documented `.env.example`; 17 release-readiness checks; full suite 306 tests across 29 modules
 
 Overall: End-to-end UX verified (natural language, LLM routing, tool execution, memory, tasks/agent, security, safety). Minor inconsistency: some reports refer to older "FOUNDATION" labeling, but implementation matches the concrete requirements.
 
@@ -94,6 +127,47 @@ Data safety helpers present and tested: VERIFIED.
 | Unified API surface | engine + assistant | consistent responses | live: engine path behaves like assistant | VERIFIED | N/A |
 
 Engine polish: VERIFIED.
+
+## Phase 12 - API / Web UI
+| Requirement | Files/Entry | Verification | Test Evidence | Status | Limitations/Next |
+|---|---|---|---|---|---|
+| Tool listing API | jarvis/app.py (`GET /api/tools`) | Returns name/description/permissions for all 51 tools | test_phase12_api: tools listing | VERIFIED | Read-only introspection |
+| Tool execution API | jarvis/app.py (`POST /api/tools/{name}`) | Runs a tool; 404 on unknown; confirmation-gated tools report `needs_confirmation` | test_phase12_api: echo, unknown, gated | VERIFIED | Gated tools require `confirm: true` |
+| Chat API | jarvis/app.py (`POST /api/chat`) | Returns text + provider + tool + session; offline via `mode: basic` | test_phase12_api: chat basic | VERIFIED | Auto/llm modes need a live provider |
+| Status API | jarvis/app.py (`GET /api/status`) | Tool count, provider readiness, voice availability, host/port | test_phase12_api: status | VERIFIED | No network calls |
+| Web UI | web/index.html, app.js, style.css | Chat + Tools + Settings tabs; chat log, tool picker/runner, provider settings | test_phase12_api: index + static | VERIFIED | Vanilla JS, no build step |
+| Health probe opt-out | jarvis/app.py (`GET /api/health?probe=false`) | Skips live provider probing | test_phase12_api: health | VERIFIED | Default still probes |
+
+API/Web UI: VERIFIED.
+
+## Phase 13 - Resumable Workflows
+| Requirement | Files/Entry | Verification | Test Evidence | Status | Limitations/Next |
+|---|---|---|---|---|---|
+| Persistent workflow model | jarvis/workflows.py (`Workflow`, `WorkflowStep`) | State written after every step to `data/workflows/<id>.json`; reload works | test_phase13: store roundtrip, restart | VERIFIED | JSON store, one file per workflow |
+| Lifecycle control | jarvis/workflows.py (`WorkflowEngine`) | start/pause/resume/cancel with status validation | test_phase13: lifecycle, terminal-aware | VERIFIED | Synchronous execution |
+| Resume after restart | `WorkflowEngine.start/resume` | Fresh engine over same dir resumes from next incomplete step | test_phase13: restart + skip-completed | VERIFIED | N/A |
+| Confirmation checkpoints | registry gating + `_run_step` | Gated step → `blocked`; resume w/ confirm proceeds | test_phase13: block, resume, honest failure | VERIFIED | One confirmation authorizes remaining steps |
+| Data flow between steps | `${goal}`, `${context.k}`, `${steps.<id>.result[.path]}` | Values resolved from prior step results | test_phase13: interpolation | VERIFIED | String-token substitution |
+| Error handling | per-step `max_retries`, `optional`, `continue_on_error` | Retries recorded; optional→skipped; continue_on_error proceeds | test_phase13: retries, optional, continue, required | VERIFIED | Fixed retry count (no backoff) |
+| Tools | 9 workflow.* tools | Registered in enhanced registry (60 tools total) | test_phase13: registration + permissions | VERIFIED | `workflow.run` gated |
+| CLI | `jarvis.cli` `workflow` group | list/show/create/run/resume/cancel | manual CliRunner check | VERIFIED | Fixed misplaced `__main__` block |
+
+Resumable Workflows: VERIFIED.
+
+## Phase 14 - Atif Bridge / IoT (optional)
+| Requirement | Files/Entry | Verification | Test Evidence | Status | Limitations/Next |
+|---|---|---|---|---|---|
+| Atif bridge status | jarvis/atif_client.py (`atif.status`) | Sync health probe; reports URL/reachability/mode | test_phase14 (patched) + live health verified | VERIFIED | Live `ask` slower than 3s health probe |
+| Atif bridge ask | jarvis/atif_client.py (`atif.ask`) | POST {question, session} matches Atif `Ask` schema; honest failure | test_phase14 (patched) | VERIFIED | Long timeout (120s); live ask not user-flow verified |
+| Atif URL config | jarvis/atif_client.py (`atif.set_url`) | Validates http(s), persists to settings | test_phase14 | VERIFIED | N/A |
+| IoT device registry | jarvis/iot.py (`Device`, `DeviceStore`) | JSON under `data/iot/devices.json`; CRUD + state persistence | test_phase14 | VERIFIED | One flat registry |
+| IoT providers | `MockDeviceProvider`, `HttpDeviceProvider`, `HomeAssistantProvider` | Mock offline; http safe-URL + honest errors; HA honest when unconfigured | test_phase14 | VERIFIED | HA requires url+token settings |
+| IoT control | `IoTManager.control` | on/off/toggle/set/status; state persisted | test_phase14 | VERIFIED | N/A |
+| Safety | permissions + registry gating | `iot.control` confirmation-gated; addresses restricted to http(s) | test_phase14 | VERIFIED | N/A |
+| Tools | 3 atif + 6 iot tools | Registered in enhanced registry (69 tools total) | test_phase14 | VERIFIED | N/A |
+| CLI | `jarvis iot ...`; existing `jarvis atif ...` | providers/list/add/control/remove | manual check | VERIFIED | N/A |
+
+Atif Bridge / IoT: VERIFIED.
 
 ## End-to-End User Experience (critical checks)
 | Scenario | Verification | Status | Notes |

@@ -1,7 +1,144 @@
 const providersEl = document.getElementById("providers-list");
 const providersStatus = document.getElementById("providers-status");
 const settingsStatus = document.getElementById("settings-status");
+const statusLine = document.getElementById("status-line");
+const chatLog = document.getElementById("chat-log");
+const toolsList = document.getElementById("tools-list");
+const toolParams = document.getElementById("tool-params");
+const toolConfirm = document.getElementById("tool-confirm");
+const toolResult = document.getElementById("tool-result");
+const toolRun = document.getElementById("tool-run");
+const toolRunnerName = document.getElementById("tool-runner-name");
 
+let selectedTool = null;
+
+/* ---------------------------------------------------------------- tabs */
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
+  });
+});
+
+/* -------------------------------------------------------------- status */
+async function loadStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const tts = s.voice && s.voice.tts && s.voice.tts.available ? "tts" : "no-tts";
+    const stt = s.voice && s.voice.stt && s.voice.stt.available ? "stt" : "no-stt";
+    statusLine.textContent = `${s.tools} tools - ${s.has_provider ? "AI ready" : "offline"} - ${tts} - ${stt}`;
+  } catch {
+    statusLine.textContent = "offline";
+  }
+}
+
+/* ---------------------------------------------------------------- chat */
+function addChat(role, text) {
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  div.textContent = text;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+async function sendChat() {
+  const input = document.getElementById("chat-input");
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = "";
+  addChat("user", message);
+  const pending = document.createElement("div");
+  pending.className = "msg assistant";
+  pending.textContent = "...";
+  chatLog.appendChild(pending);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, mode: document.getElementById("chat-mode").value }),
+    });
+    const body = await res.json();
+    pending.textContent = body.text || "(no response)";
+    if (body.provider) pending.dataset.provider = body.provider;
+  } catch (err) {
+    pending.textContent = `Error: ${err.message}`;
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+document.getElementById("chat-send").addEventListener("click", sendChat);
+document.getElementById("chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendChat();
+});
+
+/* --------------------------------------------------------------- tools */
+async function loadTools() {
+  try {
+    const data = await (await fetch("/api/tools")).json();
+    toolsList.innerHTML = "";
+    for (const t of data.tools) {
+      const item = document.createElement("div");
+      item.className = "tool-item";
+      item.dataset.name = t.name;
+      const name = document.createElement("strong");
+      name.textContent = t.name;
+      const desc = document.createElement("span");
+      desc.className = "tool-desc";
+      desc.textContent = t.description || "";
+      const perms = document.createElement("span");
+      perms.className = "tool-perms";
+      perms.textContent = (t.permissions || []).join(", ") || "no permissions";
+      item.append(name, desc, perms);
+      item.addEventListener("click", () => selectTool(t));
+      toolsList.appendChild(item);
+    }
+  } catch {
+    toolsList.textContent = "Could not load tools.";
+  }
+}
+
+function selectTool(t) {
+  selectedTool = t;
+  toolRunnerName.textContent = t.name;
+  document.querySelectorAll(".tool-item").forEach((el) => {
+    el.classList.toggle("selected", el.dataset.name === t.name);
+  });
+  toolResult.textContent = "";
+  toolRun.disabled = false;
+}
+
+async function runTool() {
+  if (!selectedTool) return;
+  let params = {};
+  const raw = toolParams.value.trim();
+  if (raw) {
+    try {
+      params = JSON.parse(raw);
+    } catch (err) {
+      toolResult.textContent = `Invalid JSON: ${err.message}`;
+      return;
+    }
+  }
+  toolResult.textContent = "Running...";
+  try {
+    const res = await fetch(`/api/tools/${encodeURIComponent(selectedTool.name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ params, confirm: toolConfirm.checked }),
+    });
+    const body = await res.json();
+    toolResult.textContent = JSON.stringify(body, null, 2);
+  } catch (err) {
+    toolResult.textContent = `Error: ${err.message}`;
+  }
+}
+
+toolRun.addEventListener("click", runTool);
+
+/* ------------------------------------------------------------ providers */
 function badge(state) {
   const b = document.createElement("span");
   b.className = "pbadge";
@@ -207,5 +344,7 @@ document.getElementById("save-settings").addEventListener("click", async () => {
   }
 });
 
+loadStatus();
 loadProviders();
 loadSettings();
+loadTools();
