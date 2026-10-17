@@ -1,5 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'com.chaquo.python'
+plugins {
+    id "com.android.application"
+    id "com.chaquo.python"
+}
 
 android {
     namespace "ai.jarvis.assistant"
@@ -15,6 +17,7 @@ android {
             abiFilters "arm64-v8a", "x86_64"
         }
         python {
+            version "3.12"
             pip {
                 install "fastapi"
                 install "uvicorn"
@@ -30,6 +33,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
 
@@ -45,17 +49,5 @@ android {
     }
 }
 
-chaquopy {
-    defaultConfig {
-        version "3.12"
-        pip {
-            install "fastapi"
-            install "uvicorn"
-            install "httpx"
-            install "pydantic"
-            install "python-dateutil"
-            install "jinja2"
-            install "python-dotenv"
-        }
-    }
+dependencies {
 }
