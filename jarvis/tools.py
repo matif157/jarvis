@@ -531,4 +531,22 @@ def get_enhanced_registry() -> ToolRegistry:
     except Exception:
         pass
 
+    # web search tools (Phase 16)
+    try:
+        from . import web_search
+
+        for t in web_search.get_web_tools():
+            reg.register(t)
+    except Exception:
+        pass
+
+    # weather tools (pluggable provider with mock fallback)
+    try:
+        from . import weather_tools
+
+        for t in weather_tools.get_weather_tools():
+            reg.register(t)
+    except Exception:
+        pass
+
     return reg

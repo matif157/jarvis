@@ -28,6 +28,13 @@ PORT = int(os.getenv("JARVIS_PORT", "8771"))
 # Atif Assistant bridge
 ATIF_URL = os.getenv("JARVIS_ATIF_URL", "http://127.0.0.1:8770")
 
+# Weather configuration
+WEATHER_PROVIDER = os.getenv("JARVIS_WEATHER_PROVIDER", "mock").lower()  # mock | openweathermap
+WEATHER_API_KEY = os.getenv("JARVIS_WEATHER_API_KEY") or os.getenv("OPENWEATHERMAP_API_KEY") or os.getenv("WEATHER_API_KEY")
+WEATHER_BASE_URL = os.getenv("JARVIS_WEATHER_BASE_URL", "https://api.openweathermap.org/data/2.5")
+WEATHER_DEFAULT_LOCATION = os.getenv("JARVIS_WEATHER_LOCATION", "London,UK")
+WEATHER_UNITS = os.getenv("JARVIS_WEATHER_UNITS", "metric")  # metric | imperial | standard
+
 # Provider configuration
 def _provider_order() -> list:
     raw = os.getenv("JARVIS_PROVIDERS", "groq,gemini,openrouter,ollama")

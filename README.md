@@ -22,7 +22,7 @@ Current release: **v1.0.0** (see `RELEASE_NOTES.md` and `CHANGELOG.md`).
 - **Integrations** — Google Drive, resume/career helpers, and email
   (opt-in, credential-gated).
 - **Job workflow** — discovery and application tracking with a status machine.
-- **Voice** — macOS `say` text-to-speech plus optional, pluggable speech-to-text.
+- **Weather** — pluggable provider with safe mock fallback (OpenWeatherMap or `mock` via `WEATHER_PROVIDER`, `WEATHER_API_KEY`, `WEATHER_LOCATION`, `WEATHER_UNITS`).
 - **API + web UI** — JSON endpoints for tools, chat, and status, plus a
   three-tab web console (Chat / Tools / Settings).
 - **Resumable workflows** — persistent multi-step plans that survive restarts.
@@ -107,7 +107,11 @@ Configuration is read from the environment (and an optional `.env`). See
 | `JARVIS_HOST` | `127.0.0.1` | API/web bind address |
 | `JARVIS_PORT` | `8771` | API/web port |
 | `JARVIS_PROVIDERS` | `groq,gemini,openrouter,ollama` | Provider preference order |
-| `JARVIS_ATIF_URL` | `http://127.0.0.1:8770` | Atif Assistant bridge URL |
+| `JARVIS_WEATHER_PROVIDER` | `mock` | `mock` or `openweathermap` |
+| `JARVIS_WEATHER_API_KEY` | `-` | API key for OpenWeatherMap (or `OPENWEATHERMAP_API_KEY`) |
+| `JARVIS_WEATHER_LOCATION` | `London,UK` | Default location |
+| `JARVIS_WEATHER_UNITS` | `metric` | `metric`, `imperial`, or `standard` |
+| `JARVIS_WEATHER_BASE_URL` | `https://api.openweathermap.org/data/2.5` | Override base URL if needed |
 | `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` | — | Cloud provider keys |
 | `JARVIS_DATA_DIR` / `JARVIS_CONFIG_DIR` | `./data` / `./config` | Local storage |
 
