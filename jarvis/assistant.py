@@ -15,7 +15,7 @@ SYSTEM_PROMPT = (
     "You are Jarvis, a concise, local-first personal assistant. "
     "Answer directly and briefly. Do not add filler or disclaimers. "
     "If you do not know something, say so plainly. "
-    "Use tools when they help (available: time.now, echo). "
+    "You can call tools (the router lists what is available); use them when they help. "
     "Keep responses short."
 )
 
@@ -23,17 +23,18 @@ SYSTEM_PROMPT = (
 class Assistant:
     """Main Jarvis assistant class with basic, LLM and Atif modes."""
 
-    def __init__(self, mode: str = "auto"):
+    def __init__(self, mode: str = "auto", interactive: bool = False):
         self.name = "Jarvis"
         self.created_at = datetime.now()
         self.is_active = False
         self.mode = mode  # auto | basic | llm | atif
+        self.interactive = interactive
         self.session = f"cli-{int(datetime.now().timestamp())}"
         self.history: list = []
         from .tools import get_enhanced_registry
         self.registry = get_enhanced_registry()
         self.router = Router(registry=self.registry)
-        self.action_loop = ActionLoop(registry=self.registry, router=self.router, interactive=False)
+        self.action_loop = ActionLoop(registry=self.registry, router=self.router, interactive=interactive)
 
     def greet(self) -> str:
         hour = datetime.now().hour
@@ -108,16 +109,6 @@ class Assistant:
                 text = loop_res["text"]
                 self._record(query, text)
                 return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
-            decision = await self.router.route(
-                query,
-                history=self.history[-8:],
-                context=ctx,
-            )
-            if decision.get("kind") in ("chat", "tool") and decision.get("text"):
-                text = decision["text"]
-                self._record(query, text)
-                return text, decision.get("provider") or "llm", decision.get("tool")
-            # Fallback to Atif if LLM/router didn't produce usable result
             res = await self.atif_respond(query)
             if res[0]:
                 self._record(query, res[0])
@@ -146,15 +137,6 @@ class Assistant:
                 text = loop_res["text"]
                 self._record(query, text)
                 return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
-            decision = await self.router.route(
-                query,
-                history=self.history[-8:],
-                context=ctx,
-            )
-            if decision.get("kind") in ("chat", "tool") and decision.get("text"):
-                text = decision["text"]
-                self._record(query, text)
-                return text, decision.get("provider") or "llm", decision.get("tool")
             if self.mode == "llm":
                 text = f"AI failed.\n\n{self.basic_respond(query)}"
                 self._record(query, text)

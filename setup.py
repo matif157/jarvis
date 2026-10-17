@@ -18,7 +18,7 @@ def _read(name: str) -> str:
 
 setup(
     name="jarvis-assistant",
-    version="1.0.0",
+    version="1.0.1",
     packages=find_packages(exclude=("tests", "tests.*")),
     include_package_data=True,
     zip_safe=False,

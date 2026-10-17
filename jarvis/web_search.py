@@ -444,3 +444,78 @@ def research(question: str, max_results: int = 10, use_mock: bool = False) -> st
     pipeline = ResearchPipeline(SearchManager(use_mock=use_mock))
     job = pipeline.research(question)
     return job.report
+
+
+# ---------------------------------------------------------------------------
+# Registered tools (Phase 6 / wired in Phase 16)
+#
+# The search layer is offline-only today (mock provider). The tools below work
+# end-to-end and are honest about that: results are labelled as mock/offline
+# until a real provider is configured.
+# ---------------------------------------------------------------------------
+
+from .tools import Tool, ToolResult  # noqa: E402  (import after module defs)
+
+
+class WebSearchTool(Tool):
+    name = "web.search"
+    description = "Search the web for a query (offline mock provider by default)"
+    permissions = ["web.search"]
+
+    def run(self, query: str, max_results: int = 10) -> ToolResult:
+        if not query or not str(query).strip():
+            return ToolResult(success=False, error="query is required", tool=self.name)
+        try:
+            manager = SearchManager()
+            response = manager.search(query, max_results=max_results)
+            results = [
+                {"title": r.title, "url": r.url, "snippet": r.snippet, "source": r.source}
+                for r in response.results
+            ]
+            is_mock = any(r.metadata.get("is_mock") for r in response.results) if response.results else True
+            payload = {
+                "query": query,
+                "provider": response.provider,
+                "results": results,
+                "offline": is_mock,
+                "note": "Offline mock results (no live search provider configured)." if is_mock else "",
+            }
+            if response.error and not results:
+                return ToolResult(success=False, error=response.error, tool=self.name, result=payload)
+            return ToolResult(success=True, result=payload, tool=self.name)
+        except Exception as exc:
+            return ToolResult(success=False, error=str(exc), tool=self.name)
+
+
+class WebResearchTool(Tool):
+    name = "web.research"
+    description = "Research a question and produce a source-linked report (offline mock by default)"
+    permissions = ["web.search"]
+
+    def run(self, question: str) -> ToolResult:
+        if not question or not str(question).strip():
+            return ToolResult(success=False, error="question is required", tool=self.name)
+        try:
+            job = ResearchPipeline(SearchManager()).research(question)
+            sources = [
+                {"title": e.get("title"), "url": e.get("url"), "source": e.get("source")}
+                for e in job.evidence
+            ]
+            return ToolResult(
+                success=True,
+                result={
+                    "question": question,
+                    "status": job.status,
+                    "evidence_count": len(job.evidence),
+                    "sources": sources,
+                    "report": job.report,
+                },
+                tool=self.name,
+            )
+        except Exception as exc:
+            return ToolResult(success=False, error=str(exc), tool=self.name)
+
+
+def get_web_tools() -> List[Tool]:
+    """Return the registered web search/research tools."""
+    return [WebSearchTool(), WebResearchTool()]

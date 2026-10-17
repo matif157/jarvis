@@ -88,7 +88,7 @@ def chat(mode):
     """Start interactive chat with Jarvis."""
     from .assistant import Assistant
 
-    Assistant(mode=mode).start()
+    Assistant(mode=mode, interactive=True).start()
 
 
 # ------------------------------------------------------------- settings

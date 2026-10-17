@@ -1,3 +1,31 @@
+# Release Notes — Jarvis v1.0.1
+
+Released: 2026-10-17
+
+Patch release fixing a routing/execution correctness bug and wiring up tools
+that were present in the codebase but not exposed to the assistant.
+
+## Fixes
+
+- **Double execution**: the router used to run a tool *and* the action loop ran
+  it again. The router now only decides; the action loop is the sole executor,
+  so each tool runs exactly once.
+- `task.reopen` / `task.cancel` no longer raise `NameError` (missing `datetime`).
+
+## Added
+
+- Registered `task.*`, `memory.*`, and `web.search` / `web.research` tools
+  (registry: 69 → **80** tools).
+- Interactive confirmation before destructive tools in `jarvis chat`/`start`;
+  non-interactive runs report `confirmation required` instead of executing.
+- Permission scopes `web.research`, `note.*`, `task.*`, `memory.*`.
+
+## Verification
+
+- **317 automated tests across 30 modules** (dependency-free runner and pytest).
+
+---
+
 # Release Notes — Jarvis v1.0.0
 
 Released: 2026-10-17

@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-17 (Phase 16 - Missing-tool wiring & routing correctness / v1.0.1)
+- **Fixed a double-execution bug**: `Router.route` no longer executes tools (it only decides chat vs. tool). `ActionLoop` is now the single executor, so every chosen tool runs exactly once.
+- **Wired missing tools** into `get_enhanced_registry()`:
+  - `task.add` / `task.list` / `task.complete` / `task.reopen` / `task.cancel` (5)
+  - `memory.remember` / `memory.recall` / `memory.list` / `memory.forget` (4)
+  - `web.search` / `web.research` (new `get_web_tools()` in `jarvis/web_search.py`, offline mock)
+  - Registry grows from 69 → **80** tools.
+- **Fixed `NameError`** in `TaskReopenTool` / `TaskCancelTool` (missing `datetime` import).
+- **Corrected macOS action class names** during re-registration (`OpenAppTool`, `OpenURLTool`, `RevealInFinderTool`, `CreateFileTool`).
+- **Confirmation gating**: interactive chat (`jarvis chat`/`start`) now prompts before running destructive tools; non-interactive runs return an honest `confirmation required` result instead of silently executing.
+- **Removed duplicated routing logic** in `Assistant.respond` (dead second router pass).
+- **Permissions allowlist** extended with `web.research`, `note.read/write`, `task.read/write`, `memory.read/write`.
+- Refreshed the assistant system prompt (removed the stale hard-coded tool list).
+- Added `tests/test_phase16_tools_and_routing.py` (11 offline checks incl. exactly-once execution and confirmation gating).
+- Full regression suite passes (**317 tests across 30 modules**).
+
 ## 2026-10-17 (Phase 15 - Release Readiness / v1.0.0)
 - Promoted the project to its first stable release: **v1.0.0** (bumped in `jarvis/__init__.py` and `setup.py`; the API now reports the package version instead of a hardcoded string).
 - Packaging: expanded `setup.py` (license, classifiers, `extras_require[dev]`, `project_urls`, `zip_safe=False`, version floors); added `pyproject.toml` (`[build-system]` + pytest/ruff config); added `MANIFEST.in` so the sdist ships the web UI, docs, and scripts while pruning `data/`.

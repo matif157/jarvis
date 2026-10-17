@@ -1,8 +1,13 @@
-"""Multi-step action loop for LLM-driven tool use."""
+"""Multi-step action loop for LLM-driven tool use.
+
+The router only *decides* (chat vs. tool + args); this loop is the single place
+that executes tools. That guarantees each chosen tool runs exactly once and
+lets confirmation-gated tools be approved (interactive) or safely declined
+(non-interactive) here.
+"""
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List, Optional
 
 from .logging import get_logger
@@ -26,13 +31,19 @@ class ActionLoop:
         self.max_steps = max(1, max_steps)
         self.interactive = interactive
 
-    def _confirm(self, name: str, args: Dict[str, Any], perms: List[str]) -> bool:
-        if not self.interactive or not perms:
-            return True
+    def _perms_for(self, tool: Optional[str]) -> List[str]:
+        spec = self.registry.get(tool) if tool else None
+        if not spec:
+            return []
         try:
-            prompt = f"Run tool '{name}' with perms {perms}? [y/N]: "
-            ans = input(prompt).strip().lower()
-            return ans in ("y", "yes")
+            return list(getattr(spec, "permissions", []) or [])
+        except Exception:
+            return []
+
+    def _ask_user(self, tool: str, perms: List[str]) -> bool:
+        try:
+            prompt = f"Run tool '{tool}' with perms {perms}? [y/N]: "
+            return input(prompt).strip().lower() in ("y", "yes")
         except Exception:
             return False
 
@@ -66,26 +77,26 @@ class ActionLoop:
             if decision.get("kind") == "tool":
                 tool = decision.get("tool")
                 args = decision.get("args") or {}
-                spec = self.registry.get(tool) if tool else None
-                perms = []
-                if spec:
-                    try:
-                        perms = list(getattr(spec, "permissions", []) or [])
-                    except Exception:
-                        perms = []
-                if not self._confirm(tool, args, perms):
-                    msg = f"Tool {tool} cancelled by user."
-                    return {
-                        "kind": "chat",
-                        "text": msg,
-                        "provider": decision.get("provider"),
-                        "steps": steps,
-                        "cancelled": True,
-                    }
-                res = self.registry.execute(tool, confirm=False, **args)
+                perms = self._perms_for(tool)
+                confirm = True
+                if any(self.registry.perms.needs_confirmation(p) for p in perms):
+                    if self.interactive:
+                        if not self._ask_user(tool, perms):
+                            return {
+                                "kind": "chat",
+                                "text": f"Tool {tool} cancelled by user.",
+                                "provider": decision.get("provider"),
+                                "steps": steps,
+                                "cancelled": True,
+                            }
+                    else:
+                        # Let the registry surface a needs_confirmation result honestly.
+                        confirm = False
+
+                res = self.registry.execute(tool, confirm=confirm, **args)
                 steps.append(
                     {
-                        "step": i + 1,
+                        "step": len(steps) + 1,
                         "tool": tool,
                         "args": args,
                         "result": res.to_dict(),

@@ -92,9 +92,10 @@ class Router:
                 args = {}
             if self.registry.get(name) is None:
                 logger.info("router picked unknown tool: %s", name)
-                return {"kind": "chat", "text": str(decision.get("reply") or text).strip(), "provider": used}
-            res = self.registry.execute(name, confirm=False, **args)
-            return {"kind": "tool", "tool": name, "args": args, "result": res.to_dict(), "text": self._summarise(name, res), "provider": used}
+                return {"kind": "chat", "text": f"I don't have a tool called '{name}'.", "provider": used}
+            # Decide only. The ActionLoop is responsible for executing tools
+            # exactly once (and for confirmation gating).
+            return {"kind": "tool", "tool": name, "args": args, "text": "", "provider": used}
         reply = (decision or {}).get("reply") if decision else None
         if not reply:
             # if LLM just returned text, use it as-is
@@ -102,9 +103,3 @@ class Router:
         # strip trailing/extra braces if any oddity
         reply = str(reply).strip()
         return {"kind": "chat", "text": reply, "provider": used}
-
-    @staticmethod
-    def _summarise(name: str, res) -> str:
-        if not res.success:
-            return f"Tool {name} failed: {res.error}"
-        return f"{name} -> {res.result}"
