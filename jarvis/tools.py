@@ -36,6 +36,10 @@ class Tool:
     description: str = ""
     permissions: List[str] = []
     requires_confirmation: bool = False
+    # Optional name of the kwarg that carries the resource (e.g. a path) this
+    # tool operates on. When set, the registry checks that resource against the
+    # permission allowlist patterns before running the tool.
+    resource_kwarg: Optional[str] = None
 
     def __init__(self):
         self.perms = PermissionManager()
@@ -94,8 +98,12 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             return ToolResult(success=False, error=f"unknown tool: {name}", tool=name)
+        resource = None
+        resource_kwarg = getattr(tool, "resource_kwarg", None)
+        if resource_kwarg:
+            resource = kwargs.get(resource_kwarg)
         for p in tool.permissions:
-            if not self.perms.is_allowed(p):
+            if not self.perms.is_allowed(p, resource=resource):
                 return ToolResult(success=False, error=f"permission denied: {p}", tool=name)
             if self.perms.needs_confirmation(p) and not confirm:
                 return ToolResult(

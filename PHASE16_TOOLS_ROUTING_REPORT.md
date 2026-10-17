@@ -57,8 +57,9 @@ execution bug, and a few stale/duplicated routing paths.
 
 ## Notes / Follow-ups
 
-- `PermissionManager.is_allowed()` still ignores the allowlist patterns (only
-  `deny` is honored). Left unchanged deliberately — it is load-bearing across
-  the codebase and changing it needs its own reviewed phase.
+- `PermissionManager.is_allowed()` now enforces allowlist patterns when called
+  with a resource (`is_allowed(scope, resource=...)`); scope-only calls remain
+  backward compatible. Resource enforcement is wired into resource-bearing tools
+  via `Tool.resource_kwarg` (fs.list/fs.read, finder.reveal, file.create).
 - `web.search`/`web.research` are offline (mock provider) until a real provider
   is configured; results are labelled as such.

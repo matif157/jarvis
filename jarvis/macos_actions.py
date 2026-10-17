@@ -280,6 +280,7 @@ class RevealInFinderTool(Tool):
     name = "finder.reveal"
     description = "Reveal a file in Finder"
     permissions = ["file.read"]
+    resource_kwarg = "file_path"
     
     def run(self, file_path: str) -> ToolResult:
         return _reveal_in_finder(file_path)
@@ -289,6 +290,7 @@ class CreateFileTool(Tool):
     name = "file.create"
     description = "Create a new file in an approved directory"
     permissions = ["file.write"]
+    resource_kwarg = "directory"
     
     def run(self, filename: str, content: str = "", directory: str = None) -> ToolResult:
         return _create_file(filename, content, directory)

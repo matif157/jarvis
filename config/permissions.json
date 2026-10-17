@@ -17,11 +17,96 @@
     "web.search": [
       "*"
     ],
+    "web.research": [
+      "*"
+    ],
+    "note.read": [
+      "*"
+    ],
+    "note.write": [
+      "*"
+    ],
+    "task.read": [
+      "*"
+    ],
+    "task.write": [
+      "*"
+    ],
+    "memory.read": [
+      "*"
+    ],
+    "memory.write": [
+      "*"
+    ],
+    "email.connect": [
+      "*"
+    ],
+    "email.read": [
+      "*"
+    ],
     "email.send": [],
     "app.open": [
       "*"
     ],
-    "system.configure": []
+    "system.configure": [],
+    "drive.access": [
+      "*"
+    ],
+    "drive.read": [
+      "*"
+    ],
+    "resume.parse": [
+      "*"
+    ],
+    "resume.read": [
+      "*"
+    ],
+    "resume.write": [
+      "*"
+    ],
+    "career.read": [
+      "*"
+    ],
+    "career.write": [
+      "*"
+    ],
+    "job.read": [
+      "*"
+    ],
+    "job.write": [
+      "*"
+    ],
+    "job.apply": [],
+    "voice.read": [
+      "*"
+    ],
+    "voice.speak": [
+      "*"
+    ],
+    "voice.listen": [],
+    "workflow.read": [
+      "*"
+    ],
+    "workflow.write": [
+      "*"
+    ],
+    "workflow.run": [],
+    "atif.read": [
+      "*"
+    ],
+    "atif.ask": [
+      "*"
+    ],
+    "atif.config": [
+      "*"
+    ],
+    "iot.read": [
+      "*"
+    ],
+    "iot.write": [
+      "*"
+    ],
+    "iot.control": []
   },
   "ask_first": [],
   "deny": []

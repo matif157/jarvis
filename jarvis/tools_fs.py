@@ -23,6 +23,7 @@ class ListFilesTool(Tool):
     name = "fs.list"
     description = "List files in a directory"
     permissions = ["file.read"]
+    resource_kwarg = "directory"
 
     def run(self, directory: str = ".", **kwargs) -> ToolResult:
         try:
@@ -44,6 +45,7 @@ class ReadFileTool(Tool):
     name = "fs.read"
     description = "Read text from a file"
     permissions = ["file.read"]
+    resource_kwarg = "path"
 
     def run(self, path: str = "", max_chars: int = 4000, **kwargs) -> ToolResult:
         try:
