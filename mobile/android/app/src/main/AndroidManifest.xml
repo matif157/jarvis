@@ -22,5 +22,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- WhatsApp reader (Phase 22): reads message notifications when the
+             user grants notification access in Settings > Notification access. -->
+        <service
+            android:name=".whatsapp.WhatsAppListener"
+            android:exported="true"
+            android:label="Jarvis WhatsApp reader"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

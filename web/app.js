@@ -1360,6 +1360,247 @@ if (memListEl) {
   if (memAutoEl) memAutoEl.addEventListener("change", toggleAutoIngest);
 }
 
+/* ----------------------------------------------------------- whatsapp */
+const waInfoEl = document.getElementById("wa-info");
+const waStatusEl = document.getElementById("wa-status");
+const waChatsEl = document.getElementById("wa-chats");
+const waListenEl = document.getElementById("wa-listen");
+const waAutoEl = document.getElementById("wa-auto");
+const waCooldownEl = document.getElementById("wa-cooldown");
+let waData = null;
+let waChatRules = {};
+
+function renderWhatsApp(data) {
+  waData = data;
+  if (!waInfoEl) return;
+  const lines = [];
+  if (!data.supported) {
+    lines.push("Live reading and replies need the Android app. Chat exports can still be imported here.");
+  } else if (data.error) {
+    lines.push(data.error);
+  } else {
+    lines.push(
+      data.listener
+        ? "Notification listener: active"
+        : "Notification listener: not granted - tap OPEN NOTIFICATION ACCESS"
+    );
+  }
+  lines.push(
+    `Stored: ${data.messages || 0} messages in ${data.chats || 0} chats` +
+      (data.targets && data.targets.length
+        ? `  ·  reply targets: ${data.targets.join(", ")}`
+        : "")
+  );
+  waInfoEl.innerHTML = lines.join("<br>");
+  if (waListenEl) waListenEl.checked = !!data.listen;
+  if (waAutoEl) waAutoEl.checked = !!data.auto_reply;
+  if (waCooldownEl && document.activeElement !== waCooldownEl) {
+    waCooldownEl.value = data.cooldown;
+  }
+  waChatRules = data.rules || {};
+}
+
+async function loadWhatsApp() {
+  try {
+    const data = await (await fetch("/api/whatsapp/status")).json();
+    renderWhatsApp(data);
+  } catch {
+    if (waInfoEl) waInfoEl.textContent = "Could not load WhatsApp status.";
+  }
+  await loadWaChats();
+}
+
+function waCard(chat) {
+  const card = document.createElement("div");
+  card.className = "mem-card";
+  const head = document.createElement("div");
+  head.className = "mem-head";
+  const title = document.createElement("div");
+  title.className = "mem-text";
+  title.textContent = chat.chat;
+  const del = document.createElement("button");
+  del.className = "mem-del";
+  del.textContent = "DELETE";
+  del.title = "Forget every stored message of this chat";
+  del.addEventListener("click", () => deleteWaChat(chat.chat));
+  head.append(title, del);
+
+  const meta = document.createElement("div");
+  meta.className = "mem-meta";
+  meta.textContent =
+    `${chat.total} messages  ·  ${chat.inbound} in / ${chat.outbound} out` +
+    (chat.last_ts ? `  ·  last: ${chat.last_ts}` : "");
+
+  const controls = document.createElement("div");
+  controls.className = "actions";
+  const rule = document.createElement("select");
+  ["off", "suggest", "auto"].forEach((mode) => {
+    const opt = document.createElement("option");
+    opt.value = mode;
+    opt.textContent =
+      mode === "off" ? "rule: off" : mode === "suggest" ? "rule: suggest reply" : "rule: auto reply";
+    rule.appendChild(opt);
+  });
+  rule.value = waChatRules[chat.chat] || chat.rule || "off";
+  rule.addEventListener("change", () => saveWaRule(chat.chat, rule.value));
+  const gen = document.createElement("button");
+  gen.textContent = "DRAFT";
+  gen.title = "Generate a suggested reply from this chat's history and style";
+  gen.addEventListener("click", () => waAction(`/api/whatsapp/generate`, { chat: chat.chat }, "Drafted a reply."));
+  const show = document.createElement("button");
+  show.textContent = "HISTORY";
+  show.addEventListener("click", () => toggleWaHistory(chat.chat, show));
+  controls.append(rule, gen, show);
+
+  card.append(head, meta, controls);
+
+  if (chat.suggestion && chat.suggestion.text) {
+    const sug = document.createElement("div");
+    sug.className = "mem-meta";
+    sug.textContent = `suggestion: ${chat.suggestion.text}`;
+    const sugActions = document.createElement("div");
+    sugActions.className = "actions";
+    const send = document.createElement("button");
+    send.textContent = "SEND";
+    send.addEventListener("click", () =>
+      waAction(`/api/whatsapp/suggestion/accept`, { chat: chat.chat }, "Sent.")
+    );
+    const dismiss = document.createElement("button");
+    dismiss.textContent = "DISMISS";
+    dismiss.addEventListener("click", () =>
+      waAction(`/api/whatsapp/suggestion/dismiss`, { chat: chat.chat }, "Dismissed.")
+    );
+    sugActions.append(send, dismiss);
+    card.append(sug, sugActions);
+  }
+
+  const history = document.createElement("pre");
+  history.className = "tool-result";
+  history.id = `wa-hist-${encodeURIComponent(chat.chat)}`;
+  history.style.display = "none";
+  card.append(history);
+  return card;
+}
+
+async function toggleWaHistory(chat, btn) {
+  const pre = document.getElementById(`wa-hist-${encodeURIComponent(chat)}`);
+  if (!pre) return;
+  if (pre.style.display !== "none") {
+    pre.style.display = "none";
+    btn.textContent = "HISTORY";
+    return;
+  }
+  try {
+    const data = await (
+      await fetch(`/api/whatsapp/history?chat=${encodeURIComponent(chat)}&limit=60`)
+    ).json();
+    pre.textContent = (data.messages || [])
+      .map((m) => `${m.ts || "?"} ${m.direction === "out" ? "me" : m.sender || "them"}: ${m.text}`)
+      .join("\n");
+    pre.style.display = "block";
+    btn.textContent = "HIDE";
+  } catch (err) {
+    pre.textContent = `Failed: ${err.message}`;
+    pre.style.display = "block";
+  }
+}
+
+async function loadWaChats() {
+  if (!waChatsEl) return;
+  try {
+    const data = await (await fetch("/api/whatsapp/chats")).json();
+    waChatsEl.innerHTML = "";
+    if (!(data.chats || []).length) {
+      const empty = document.createElement("div");
+      empty.className = "hint";
+      empty.textContent = "No chats mapped yet - import an export file or grant notification access.";
+      waChatsEl.appendChild(empty);
+      return;
+    }
+    data.chats.forEach((c) => waChatsEl.appendChild(waCard(c)));
+  } catch {
+    /* status line already explains failures */
+  }
+}
+
+async function waAction(url, body, successMsg) {
+  if (!waStatusEl) return;
+  waStatusEl.textContent = "Working...";
+  try {
+    const data = await memPost(url, body);
+    waStatusEl.textContent = successMsg || "Done.";
+    if (data && data.suggestion) waStatusEl.textContent = `Suggestion: ${data.suggestion}`;
+    if (data && data.error) waStatusEl.textContent = data.error;
+  } catch (err) {
+    waStatusEl.textContent = `Failed: ${err.message}`;
+  }
+  await loadWhatsApp();
+}
+
+async function saveWaRule(chat, mode) {
+  const rules = Object.assign({}, waChatRules);
+  if (mode === "off") delete rules[chat];
+  else rules[chat] = mode;
+  await waAction(`/api/whatsapp/settings`, { rules }, `Rule for ${chat}: ${mode}.`);
+}
+
+async function saveWaSettings() {
+  if (!waStatusEl) return;
+  waStatusEl.textContent = "Saving...";
+  try {
+    await waAction(`/api/whatsapp/settings`, {
+      listen: waListenEl.checked,
+      auto_reply: waAutoEl.checked,
+      cooldown: parseInt(waCooldownEl.value, 10) || 0,
+    }, "Saved.");
+  } catch (err) {
+    waStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function deleteWaChat(chat) {
+  if (!confirm(`Delete every stored message of "${chat}"?`)) return;
+  if (!waStatusEl) return;
+  try {
+    const res = await fetch(`/api/whatsapp/chats/${encodeURIComponent(chat)}`, {
+      method: "DELETE",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+    waStatusEl.textContent = `Removed ${data.removed} message(s).`;
+  } catch (err) {
+    waStatusEl.textContent = `Failed: ${err.message}`;
+  }
+  await loadWhatsApp();
+}
+
+async function importWaFile() {
+  const path = (document.getElementById("wa-import-path").value || "").trim();
+  if (!path) {
+    if (waStatusEl) waStatusEl.textContent = "Paste the path of an exported chat file first.";
+    return;
+  }
+  await waAction(`/api/whatsapp/import`, { path }, "Imported.");
+}
+
+const waSection = document.getElementById("wa-chats");
+if (waSection) {
+  document.getElementById("wa-refresh").addEventListener("click", loadWhatsApp);
+  document.getElementById("wa-import").addEventListener("click", importWaFile);
+  document.getElementById("wa-open-notif").addEventListener("click", () => {
+    const bridge = window.JarvisAndroid;
+    if (bridge && bridge.openNotificationSettings) {
+      bridge.openNotificationSettings();
+    } else if (waInfoEl) {
+      waInfoEl.textContent =
+        "Notification access is an Android setting: Settings > Apps > Jarvis > Notification access (or Special app access).";
+    }
+  });
+  if (waListenEl) waListenEl.addEventListener("change", saveWaSettings);
+  if (waAutoEl) waAutoEl.addEventListener("change", saveWaSettings);
+  if (waCooldownEl) waCooldownEl.addEventListener("change", saveWaSettings);
+}
+
 async function loadSettings() {
   try {
     const s = await (await fetch("/api/settings")).json();
@@ -1402,3 +1643,4 @@ loadEngines();
 loadOnDevice();
 loadVoice();
 loadMemory();
+loadWhatsApp();

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,6 +98,22 @@ CREATE TABLE IF NOT EXISTS memory_items (
 
 CREATE INDEX IF NOT EXISTS idx_memory_items_source ON memory_items(source);
 CREATE INDEX IF NOT EXISTS idx_memory_items_hash ON memory_items(hash);
+
+-- WhatsApp messages (Phase 22): the mapped chat structure
+CREATE TABLE IF NOT EXISTS wa_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat TEXT NOT NULL,
+    sender TEXT DEFAULT '',
+    direction TEXT NOT NULL DEFAULT 'in',
+    text TEXT NOT NULL,
+    ts TEXT DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'live',
+    hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_wa_messages_chat ON wa_messages(chat);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_messages_hash ON wa_messages(hash);
 """
 
 
@@ -379,6 +394,108 @@ def memory_item_facets_db() -> Dict[str, List[Dict[str, Any]]]:
             key=lambda x: (-x["count"], x["kind"]),
         ),
     }
+
+
+# WhatsApp messages (Phase 22)
+def _wa_row(r: sqlite3.Row) -> Dict[str, Any]:
+    return {
+        "id": r["id"],
+        "chat": r["chat"],
+        "sender": r["sender"] or "",
+        "direction": r["direction"],
+        "text": r["text"],
+        "ts": r["ts"] or "",
+        "source": r["source"],
+    }
+
+
+def add_wa_message_db(message: Dict[str, Any]) -> bool:
+    """Insert one WhatsApp message. Returns False when the hash already exists."""
+    conn = connect()
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO wa_messages
+           (chat, sender, direction, text, ts, source, hash, created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (
+            message["chat"],
+            message.get("sender", ""),
+            message.get("direction", "in"),
+            message["text"],
+            message.get("ts", ""),
+            message.get("source", "live"),
+            message["hash"],
+            message.get("created_at") or now(),
+        ),
+    )
+    conn.commit()
+    inserted = cur.rowcount > 0
+    conn.close()
+    return inserted
+
+
+def list_wa_messages_db(chat: str, limit: int = 100) -> List[Dict[str, Any]]:
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM wa_messages WHERE chat=? "
+        "ORDER BY (ts=''), ts, id LIMIT ?",
+        (chat, limit),
+    ).fetchall()
+    conn.close()
+    return [_wa_row(r) for r in rows]
+
+
+def list_wa_chats_db(limit: int = 500) -> List[Dict[str, Any]]:
+    conn = connect()
+    rows = conn.execute(
+        """SELECT chat,
+                  COUNT(*) AS total,
+                  SUM(CASE WHEN direction='in' THEN 1 ELSE 0 END) AS inbound,
+                  SUM(CASE WHEN direction='out' THEN 1 ELSE 0 END) AS outbound,
+                  MAX(ts) AS last_ts
+           FROM wa_messages GROUP BY chat
+           ORDER BY last_ts DESC, chat
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "chat": r["chat"],
+            "total": r["total"],
+            "inbound": r["inbound"] or 0,
+            "outbound": r["outbound"] or 0,
+            "last_ts": r["last_ts"] or "",
+        }
+        for r in rows
+    ]
+
+
+def count_wa_messages_db() -> int:
+    conn = connect()
+    row = conn.execute("SELECT COUNT(*) AS n FROM wa_messages").fetchone()
+    conn.close()
+    return int(row["n"]) if row else 0
+
+
+def last_outbound_ts_db(chat: str) -> str:
+    """Most recent sent-reply time (ISO) for cooldown checks; imports excluded."""
+    conn = connect()
+    row = conn.execute(
+        "SELECT MAX(created_at) AS ts FROM wa_messages "
+        "WHERE chat=? AND direction='out' AND source='live'",
+        (chat,),
+    ).fetchone()
+    conn.close()
+    return row["ts"] or "" if row else ""
+
+
+def delete_wa_messages_db(chat: str) -> int:
+    conn = connect()
+    cur = conn.execute("DELETE FROM wa_messages WHERE chat=?", (chat,))
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
 
 
 # Messages

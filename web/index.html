@@ -169,6 +169,31 @@
       </div>
       <div id="voice-status" class="status"></div>
 
+      <h2 style="margin-top:32px" id="whatsapp">WhatsApp</h2>
+      <p class="hint">Reads WhatsApp messages from notifications (Android, after you grant notification access) and can draft or send replies using each chat's own style. Import an exported chat file to map a full conversation. Replies only go out when auto-reply is on and the chat's rule allows it.</p>
+      <div id="wa-info" class="hint"></div>
+      <div class="actions">
+        <button id="wa-open-notif">OPEN NOTIFICATION ACCESS</button>
+        <button id="wa-refresh">REFRESH</button>
+      </div>
+      <div class="wa-settings">
+        <label class="inline">
+          <input type="checkbox" id="wa-listen"> Listen to WhatsApp notifications
+        </label>
+        <label class="inline">
+          <input type="checkbox" id="wa-auto"> Auto replies (master switch)
+        </label>
+        <label>Cooldown (seconds between auto replies)
+          <input id="wa-cooldown" type="number" min="0" max="86400" placeholder="60">
+        </label>
+      </div>
+      <div class="mem-row">
+        <input id="wa-import-path" placeholder="/path/to/WhatsApp Chat with Faraz.txt">
+        <button id="wa-import">IMPORT EXPORT FILE</button>
+      </div>
+      <div id="wa-status" class="status"></div>
+      <div id="wa-chats" class="mem-list"></div>
+
       <h2 style="margin-top:32px">Preferences</h2>
       <label>Atif Assistant URL
         <input id="set-atif-url" placeholder="http://127.0.0.1:8770">

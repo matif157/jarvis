@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-18 (Phase 22 - WhatsApp bridge: live reading, rules, replies / v1.5.0)
+- **New table `wa_messages`** (`jarvis/db.py`): chat, sender, direction (`in`/`out`/`system`), text, sortable `ts`, `source` (`live`/`export`), a content `hash` (UNIQUE, minute granularity) and `created_at` — indexed by chat, with `last_outbound_ts_db` powering the reply cooldown. Migrations stay idempotent.
+- **New `jarvis/whatsapp.py`**: the WhatsApp layer.
+  - *Live reading*: `handle_event` records notifications posted by the Android listener and applies the chat's reply rule; duplicates (same message, same minute) are ignored; the listener never retries — generation failures land in `error` without losing the recording.
+  - *Export import*: `import_export` parses WhatsApp "Export chat" `.txt`/`.zip` files — day-first and month-first dates, 12h/24h clocks, US m/d swaps, long month names, multi-line continuations, media placeholders and system lines; chat name derived from the filename (`WhatsApp Chat with X.txt`) or overridden; dedupe by content hash makes re-imports no-ops; paths checked through `security.is_path_safe`.
+  - *Per-chat rules*: `off` / `suggest` / `auto` per contact, master `auto_reply` switch gating sends only, `listen` master, `cooldown` (0–86400 s) between auto replies (live outbound only, UTC-compared). Corrupt rules settings degrade to `{}` with a warning.
+  - *Style-matched replies*: `generate_reply` feeds the chat's recent transcript plus a style fingerprint (urdu/roman-urdu/english ratios, message length, emoji habits) to the configured chat provider (409 without one); suggestions are stored under memory key `wa:suggest:{chat}` until accepted or dismissed; a failed auto-send falls back to a suggestion so the draft is never lost.
+  - *Honest off-device behaviour*: without the Android bridge, status reports `supported: false` and send attempts fail with a 409 pointing at the app.
+- **New Android bridge** (`ai.jarvis.assistant.whatsapp.WhatsAppListener` + `WhatsAppBridge`, Java): a `NotificationListenerService` posts each WhatsApp message to `/api/whatsapp/event` (3 attempts, backoff, 300-entry dedupe cache, `onNotificationRemoved` clears the reply target); the bridge tracks open reply targets (max 200, 6 h TTL) and sends replies through `RemoteInput` + `PendingIntent.fillIn`. Manifest declares the listener service (system-bound, `BIND_NOTIFICATION_LISTENER_SERVICE`).
+- **New endpoints** (`jarvis/app.py`): `GET /api/whatsapp/{status,chats,history}`, `POST /api/whatsapp/{event,reply,generate,settings,import,suggestion/accept,suggestion/dismiss}`, `DELETE /api/whatsapp/chats/{chat}`. Honest codes: 400 validation, 404 unknown suggestion/chat, 409 missing Android app / chat provider.
+- **Web UI**: Settings gains a **WhatsApp** section — notification-access status + open button, listen/auto-reply/cooldown controls, per-chat rule selects, chat list with expandable history and delete, export-import path entry.
+- **MainActivity** attaches the WhatsApp bridge and exposes `openNotificationSettings()` to jump straight to the system notification-access screen.
+- Added `tests/test_phase22_whatsapp.py` (15 offline checks: parser formats/directions/continuations, hash dedupe, listen gating, settings validation + corrupt-rule tolerance, the full should_reply matrix incl. cooldown and target requirements, generation with a faked provider + honest 409, suggest/auto event flows + send-failure fallback, suggestion lifecycle, file/zip import + re-import no-op + path rejection, style detection, delete, all HTTP endpoints). Each test runs against a throwaway SQLite file with a fake bridge mirroring the Java static API.
+- **APK v1.5.0 (versionCode 8)**, arm64-v8a.
+- Full regression suite passes (**401 tests across 38 modules**).
+
+
 ## 2026-10-17 (Phase 21 - Memory ingestion & import / v1.4.0)
 - **New table `memory_items`** (`jarvis/db.py`): durable items with `text`, subject `key`, `kind` (fact/note), `source`, comma-joined `tags`, session, a content `hash` (UNIQUE) and timestamps — added beside the legacy key/value `memory` table, which keeps serving `memory.remember`/`memory.recall`. Schema migrations stay idempotent (`CREATE TABLE IF NOT EXISTS` + indexes on `source`/`hash`).
 - **New `jarvis/memory_ingest.py`**: an ingestion pipeline that turns free text into de-duplicated items with provenance.

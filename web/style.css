@@ -286,6 +286,8 @@ label.inline { flex-direction: row; align-items: center; gap: 8px; text-transfor
 .mem-meta { font-size: 11px; color: var(--dim); margin-top: 5px; }
 .mem-row { display: flex; gap: 8px; margin-bottom: 14px; }
 .mem-row input { flex: 1; min-width: 0; }
+.wa-settings { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.wa-settings label:not(.inline) { max-width: 280px; }
 textarea {
   background: var(--panel);
   border: 1px solid var(--line);

@@ -16,9 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, engines, llm, ondevice, service_keys, voice
-from . import memory_ingest
-from . import __version__
+from . import __version__, db, engines, llm, memory_ingest, ondevice, service_keys, voice, whatsapp
 from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
 
@@ -111,6 +109,37 @@ class MemoryImportIn(BaseModel):
 
 class MemorySourceIn(BaseModel):
     source: str
+
+
+class WhatsAppEventIn(BaseModel):
+    chat: str
+    text: str
+    package: Optional[str] = ""
+    can_reply: Optional[bool] = False
+    ts_ms: Optional[int] = None
+    ts: Optional[str] = None
+    sender: Optional[str] = ""
+
+
+class WhatsAppReplyIn(BaseModel):
+    chat: str
+    text: str
+
+
+class WhatsAppChatIn(BaseModel):
+    chat: str
+
+
+class WhatsAppSettingsIn(BaseModel):
+    listen: Optional[bool] = None
+    auto_reply: Optional[bool] = None
+    rules: Optional[Dict[str, str]] = None
+    cooldown: Optional[int] = None
+
+
+class WhatsAppImportIn(BaseModel):
+    path: str
+    chat: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -677,6 +706,128 @@ def delete_memory_source(payload: MemorySourceIn) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "source is required"}, status_code=400)
     removed = memory_ingest.delete_source(payload.source)
     return JSONResponse({"ok": True, "source": payload.source, "removed": removed})
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp bridge (Phase 22): live reading, rules, replies, import
+# ---------------------------------------------------------------------------
+def _whatsapp_error(message: str, status: int = 400) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": str(message)}, status_code=status)
+
+
+@app.get("/api/whatsapp/status")
+def whatsapp_status() -> dict:
+    """Listener/reply support, settings, and stored-message counts."""
+    return whatsapp.status_payload()
+
+
+@app.get("/api/whatsapp/chats")
+def whatsapp_chats(limit: int = 500) -> dict:
+    """Mapped chat structure: counts, last activity, reply rule, suggestion."""
+    rows = whatsapp.chats(limit)
+    for row in rows:
+        row["suggestion"] = whatsapp.get_suggestion(row["chat"])
+    return {"ok": True, "count": len(rows), "chats": rows}
+
+
+@app.get("/api/whatsapp/history")
+def whatsapp_history(chat: str, limit: int = 100) -> JSONResponse:
+    try:
+        return JSONResponse({"ok": True, **whatsapp.history(chat, limit)})
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+
+
+@app.post("/api/whatsapp/event")
+async def whatsapp_event(payload: WhatsAppEventIn) -> JSONResponse:
+    """Record a live message (from the Android listener) and apply rules."""
+    event = {
+        "chat": payload.chat,
+        "text": payload.text,
+        "package": payload.package or "",
+        "can_reply": bool(payload.can_reply),
+        "ts_ms": payload.ts_ms,
+        "ts": payload.ts or "",
+        "sender": payload.sender or "",
+    }
+    try:
+        result = await whatsapp.handle_event(event)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse(result)
+
+
+@app.post("/api/whatsapp/reply")
+async def whatsapp_reply(payload: WhatsAppReplyIn) -> JSONResponse:
+    """Send a reply through WhatsApp's reply action (Android only)."""
+    try:
+        data = await asyncio.to_thread(whatsapp.send_reply, payload.chat, payload.text)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, **data})
+
+
+@app.post("/api/whatsapp/generate")
+async def whatsapp_generate(payload: WhatsAppChatIn) -> JSONResponse:
+    """Draft a style-matched reply for a chat and store it as a suggestion."""
+    try:
+        text = await whatsapp.generate_reply(payload.chat)
+        suggestion = whatsapp.set_suggestion(payload.chat, text)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, **suggestion})
+
+
+@app.post("/api/whatsapp/suggestion/accept")
+async def whatsapp_accept(payload: WhatsAppChatIn) -> JSONResponse:
+    try:
+        data = await asyncio.to_thread(whatsapp.accept_suggestion, payload.chat)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, **data})
+
+
+@app.post("/api/whatsapp/suggestion/dismiss")
+def whatsapp_dismiss(payload: WhatsAppChatIn) -> JSONResponse:
+    try:
+        data = whatsapp.dismiss_suggestion(payload.chat)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, **data})
+
+
+@app.post("/api/whatsapp/import")
+def whatsapp_import(payload: WhatsAppImportIn) -> JSONResponse:
+    """Import a WhatsApp "Export chat" .txt or .zip file."""
+    try:
+        result = whatsapp.import_export(payload.path, chat=payload.chat)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, **result})
+
+
+@app.post("/api/whatsapp/settings")
+def whatsapp_set_settings(payload: WhatsAppSettingsIn) -> JSONResponse:
+    """Update listen/auto-reply/rules/cooldown settings."""
+    try:
+        effective = whatsapp.apply_settings(
+            listen=payload.listen,
+            auto_reply=payload.auto_reply,
+            rules=payload.rules,
+            cooldown=payload.cooldown,
+        )
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, **effective})
+
+
+@app.delete("/api/whatsapp/chats/{chat}")
+async def whatsapp_delete_chat(chat: str) -> JSONResponse:
+    try:
+        removed = await asyncio.to_thread(whatsapp.delete_chat, chat)
+    except whatsapp.WhatsAppError as exc:
+        return _whatsapp_error(exc, exc.status)
+    return JSONResponse({"ok": True, "chat": chat, "removed": removed})
 
 
 @app.get("/api/providers")
