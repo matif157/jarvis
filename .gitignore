@@ -43,3 +43,8 @@ data/
 .cache/
 config/local.json
 .env
+
+# Android staged Python sources (copied by Gradle)
+mobile/android/app/src/main/python/jarvis/
+mobile/android/app/src/main/python/web/
+jarvis.apk

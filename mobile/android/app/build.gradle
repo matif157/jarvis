@@ -51,3 +51,30 @@ android {
 
 dependencies {
 }
+
+// Stage Jarvis Python code + web UI into the Chaquopy source set so every
+// build ships the app code (previously only build_apk.sh did this copy).
+def repoRoot = file("${rootDir}/../..")
+def stageTask = tasks.register("stageJarvisPython", Copy) {
+    into("${projectDir}/src/main/python")
+    from("${repoRoot}/jarvis") {
+        into "jarvis"
+        exclude "**/__pycache__/**"
+        exclude "*.pyc"
+    }
+    from("${repoRoot}/web") {
+        into "web"
+        exclude "**/__pycache__/**"
+        exclude "*.pyc"
+    }
+    outputs.upToDateWhen { false }
+}
+
+tasks.named("preBuild").configure { dependsOn(stageTask) }
+
+// Chaquopy's python-source merge also reads this dir — wire it explicitly.
+afterEvaluate {
+    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("PythonSources") }.configureEach {
+        dependsOn(stageTask)
+    }
+}
