@@ -3,9 +3,29 @@
 import os
 import sys
 import threading
+import traceback
 
 _started = False
 _lock = threading.Lock()
+_last_error = ""
+
+
+def _record_error(exc: BaseException) -> None:
+    global _last_error
+    _last_error = "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    )
+    print("JARVIS_SERVER_ERROR:\n" + _last_error, file=sys.stderr)
+    sys.stderr.flush()
+
+
+def get_status():
+    """Return server startup status for on-device diagnostics."""
+    return {
+        "started": _started,
+        "running": _started and not _last_error,
+        "error": _last_error,
+    }
 
 
 def start(files_dir, host="127.0.0.1", port=8771):
@@ -41,11 +61,10 @@ def start(files_dir, host="127.0.0.1", port=8771):
                 config = uvicorn.Config(app, host=host, port=port, log_level=log_level, access_log=access_log)
                 server = uvicorn.Server(config)
                 server.run()
-            except Exception as e:
-                print("UVICORN_ERROR:", e, file=sys.stderr)
+            except Exception as e:  # pragma: no cover - device only
+                _record_error(e)
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-    except Exception as e:
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+    except Exception as e:  # pragma: no cover - device only
+        _record_error(e)

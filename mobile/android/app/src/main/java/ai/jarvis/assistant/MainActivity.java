@@ -11,6 +11,7 @@ import com.chaquo.python.android.AndroidPlatform;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final String HOME_URL = "http://127.0.0.1:8771/";
@@ -25,11 +26,13 @@ public class MainActivity extends Activity {
             + "content=\"width=device-width, initial-scale=1\">"
             + "<style>body{font-family:sans-serif;display:flex;align-items:center;"
             + "justify-content:center;height:100vh;margin:0;background:#0f1115;color:#e8e8e8}"
-            + "div{text-align:center}h1{font-weight:600;letter-spacing:2px}"
-            + "p{color:#9aa0a6;font-size:14px}</style></head>"
-            + "<body><div><h1>JARVIS</h1><p id=\"s\">Starting local assistant\u2026</p></div>"
-            + "<script>var d=0;setInterval(function(){d++;document.getElementById('s')"
-            + ".textContent='Starting local assistant\u2026 '+(d/2).toFixed(0)+'s';},500);"
+            + "div{text-align:center;padding:20px}h1{font-weight:600;letter-spacing:2px}"
+            + "p{color:#9aa0a6;font-size:14px}pre{color:#ff8a80;font-size:11px;text-align:left;"
+            + "white-space:pre-wrap;word-break:break-word;max-width:90vw}</style></head>"
+            + "<body><div><h1>JARVIS</h1><p id=\"s\">Starting local assistant\u2026</p>"
+            + "<pre id=\"e\"></pre></div>"
+            + "<script>var d=0;setInterval(function(){d++;var e=document.getElementById('s');"
+            + "if(e)e.textContent='Starting local assistant\u2026 '+(d/2).toFixed(0)+'s';},500);"
             + "</script></body></html>";
 
     @Override
@@ -37,14 +40,24 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        if (!Python.isStarted()) {
-            Python.start(new AndroidPlatform(this));
+        try {
+            if (!Python.isStarted()) {
+                Python.start(new AndroidPlatform(this));
+            }
+        } catch (Throwable t) {
+            showFatal("Python failed to start", t);
+            return;
         }
 
         setupWebView();
         webView.loadDataWithBaseURL(HOME_URL, LOADING_HTML, "text/html", "utf-8", null);
 
-        startServer();
+        try {
+            startServer();
+        } catch (Throwable t) {
+            showFatal("Server launch failed", t);
+            return;
+        }
         waitForServerThenLoad();
     }
 
@@ -72,8 +85,8 @@ public class MainActivity extends Activity {
             try {
                 Python py = Python.getInstance();
                 py.getModule("run_server").callAttr("start", getFilesDir().getAbsolutePath());
-            } catch (Exception e) {
-                e.printStackTrace();
+            } catch (Throwable t) {
+                t.printStackTrace();
             }
         }).start();
     }
@@ -90,12 +103,16 @@ public class MainActivity extends Activity {
                     });
                     return;
                 }
+                if (isServerErrored()) {
+                    break;
+                }
                 try {
                     Thread.sleep(POLL_INTERVAL_MS);
                 } catch (InterruptedException e) {
                     return;
                 }
             }
+            runOnUiThread(this::showDiagnostics);
         }).start();
     }
 
@@ -106,8 +123,7 @@ public class MainActivity extends Activity {
             conn.setConnectTimeout(1500);
             conn.setReadTimeout(1500);
             conn.setRequestMethod("GET");
-            int code = conn.getResponseCode();
-            return code == 200;
+            return conn.getResponseCode() == 200;
         } catch (Exception e) {
             return false;
         } finally {
@@ -115,6 +131,64 @@ public class MainActivity extends Activity {
                 conn.disconnect();
             }
         }
+    }
+
+    private boolean isServerErrored() {
+        try {
+            Python py = Python.getInstance();
+            Map<?, ?> status = (Map<?, ?>) py.getModule("run_server")
+                    .callAttr("get_status").toJava(Object.class);
+            Object err = status.get("error");
+            return err != null && !err.toString().isEmpty();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void showDiagnostics() {
+        if (webView == null) {
+            return;
+        }
+        String err = "";
+        try {
+            Python py = Python.getInstance();
+            Map<?, ?> status = (Map<?, ?>) py.getModule("run_server")
+                    .callAttr("get_status").toJava(Object.class);
+            Object e = status.get("error");
+            if (e != null) {
+                err = e.toString();
+            }
+        } catch (Throwable t) {
+            err = String.valueOf(t);
+        }
+        if (err.isEmpty()) {
+            err = "Server did not become ready within " + (MAX_WAIT_MS / 1000) + "s.";
+        }
+        String esc = err.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        String html = "<!DOCTYPE html><html><head><meta name=\"viewport\" "
+                + "content=\"width=device-width, initial-scale=1\"></head>"
+                + "<body style=\"background:#0f1115;color:#e8e8e8;font-family:sans-serif;padding:16px\">"
+                + "<h2>Jarvis could not start</h2><p style=\"color:#9aa0a6\">Diagnostics:</p>"
+                + "<pre style=\"color:#ff8a80;font-size:11px;white-space:pre-wrap;word-break:break-word\">"
+                + esc + "</pre></body></html>";
+        webView.loadDataWithBaseURL(HOME_URL, html, "text/html", "utf-8", null);
+    }
+
+    private void showFatal(String title, Throwable t) {
+        if (webView == null) {
+            setupWebView();
+        }
+        StringBuilder sb = new StringBuilder(title).append("\n");
+        sb.append(t.toString()).append("\n");
+        for (StackTraceElement el : t.getStackTrace()) {
+            sb.append("  at ").append(el.toString()).append("\n");
+        }
+        String esc = sb.toString().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        String html = "<!DOCTYPE html><html><body style=\"background:#0f1115;color:#e8e8e8;"
+                + "font-family:sans-serif;padding:16px\"><h2>Jarvis error</h2>"
+                + "<pre style=\"color:#ff8a80;font-size:11px;white-space:pre-wrap\">"
+                + esc + "</pre></body></html>";
+        webView.loadDataWithBaseURL(HOME_URL, html, "text/html", "utf-8", null);
     }
 
     @Override
