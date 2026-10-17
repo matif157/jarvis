@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, engines, llm, ondevice, service_keys
+from . import db, engines, llm, ondevice, service_keys, voice
 from . import __version__
 from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
@@ -69,6 +69,19 @@ class OnDeviceIn(BaseModel):
     id: Optional[str] = None
     prompt: Optional[str] = None
     max_tokens: Optional[int] = None
+
+
+class VoiceIn(BaseModel):
+    text: str = ""
+    voice: str = ""
+    rate: float = 0.0
+    language: str = ""
+    audio_path: str = ""
+    seconds: int = 8
+
+
+class WakeIn(BaseModel):
+    keyword: str = "jarvis"
 
 
 @app.on_event("startup")
@@ -383,6 +396,153 @@ async def ondevice_generate(payload: OnDeviceIn) -> JSONResponse:
     except ondevice.OnDeviceError as exc:
         return _ondevice_error(exc)
     return JSONResponse({"ok": True, "text": text, "provider": "on_device"})
+
+
+# ---------------------------------------------------------------------------
+# Voice (Phase 20): TTS, speech-to-text and the wake word
+# ---------------------------------------------------------------------------
+def _voice_error(message: str) -> JSONResponse:
+    """Map voice failures to honest HTTP codes.
+
+    409 = a prerequisite is missing (Android app, API key), 403 = permission
+    denied on-device, 400 = anything else.
+    """
+    msg = str(message)
+    if (
+        "requires the Android app" in msg
+        or "key is required" in msg
+        or "needs a " in msg
+    ):
+        code = 409
+    elif "permission" in msg:
+        code = 403
+    else:
+        code = 400
+    return JSONResponse({"ok": False, "error": msg}, status_code=code)
+
+
+@app.get("/api/voice/status")
+def get_voice_status() -> dict:
+    """Combined voice report: providers, engine choice, wake-word state."""
+    return voice.status_payload()
+
+
+@app.post("/api/voice/speak")
+def post_voice_speak(payload: VoiceIn) -> JSONResponse:
+    """Speak text aloud (Android TTS on-device, ``say`` on macOS)."""
+    text = (payload.text or "").strip()
+    if not text:
+        return JSONResponse(
+            {"ok": False, "error": "text is required"}, status_code=400
+        )
+    text = text[: voice.MAX_SPEAK_CHARS]
+    language = (payload.language or "").strip() or None
+    try:
+        if voice.is_android():
+            data = voice.speak_text(text, language=language, rate=payload.rate or None)
+            out = {"ok": True, "provider": "android_tts", "chars": len(text)}
+            if "queued" in data:
+                out["queued"] = bool(data["queued"])
+            return JSONResponse(out)
+        manager = voice.VoiceManager()
+        ok, message = manager.speak(
+            text,
+            voice=(payload.voice or None),
+            rate=int(payload.rate) if payload.rate else None,
+        )
+        if not ok:
+            return _voice_error(message)
+        return JSONResponse(
+            {"ok": True, "provider": manager.tts.name, "chars": len(text)}
+        )
+    except voice.VoiceError as exc:
+        return _voice_error(str(exc))
+
+
+@app.post("/api/voice/stop")
+def post_voice_stop() -> dict:
+    """Stop any ongoing utterance."""
+    try:
+        voice.stop_speech()
+        return {"ok": True}
+    except voice.VoiceError as exc:
+        return _voice_error(str(exc))
+
+
+@app.get("/api/voice/voices")
+def get_voice_voices(language: Optional[str] = None) -> dict:
+    """TTS voices (Android engine voices, or macOS ``say`` voices)."""
+    manager = voice.VoiceManager()
+    if voice.is_android():
+        names = voice.list_voices(language)
+    else:
+        names = manager.tts.voices()
+    return {
+        "ok": True,
+        "provider": manager.tts.name,
+        "count": len(names),
+        "voices": names,
+    }
+
+
+@app.post("/api/voice/transcribe")
+async def post_voice_transcribe(payload: VoiceIn) -> JSONResponse:
+    """Transcribe live speech (mic) or a file, honouring ``engine.stt``.
+
+    Live capture is blocking for up to ~30 s, so it runs off the event loop.
+    """
+    language = (payload.language or "").strip() or None
+    path = (payload.audio_path or "").strip()
+    try:
+        if path:
+            ok, text, provider = await asyncio.to_thread(
+                voice.transcribe_file, path, language
+            )
+        else:
+            seconds = max(1, min(int(payload.seconds or 8), 30))
+            ok, text, provider = await asyncio.to_thread(
+                voice.transcribe_live, language, seconds, None
+            )
+    except voice.VoiceError as exc:
+        return _voice_error(str(exc))
+    if not ok:
+        return _voice_error(text)
+    return JSONResponse(
+        {"ok": True, "transcript": text, "provider": provider}
+    )
+
+
+@app.get("/api/wake/status")
+def get_wake_status() -> dict:
+    """Wake-word state: supported/running/keyword + key availability."""
+    data = dict(voice.wake_status())
+    data["key_set"] = bool(service_keys.get_key("picovoice"))
+    data["keywords"] = voice.wake_keywords()
+    return data
+
+
+@app.post("/api/wake/start")
+def post_wake_start(payload: WakeIn) -> JSONResponse:
+    """Start listening for the wake word (needs the Android app + key)."""
+    try:
+        data = voice.wake_start(
+            service_keys.get_key("picovoice") or "", payload.keyword
+        )
+    except voice.VoiceError as exc:
+        return _voice_error(str(exc))
+    out = {"ok": True}
+    if "keyword" in data:
+        out["keyword"] = data["keyword"]
+    return JSONResponse(out)
+
+
+@app.post("/api/wake/stop")
+def post_wake_stop() -> JSONResponse:
+    try:
+        voice.wake_stop()
+        return JSONResponse({"ok": True})
+    except voice.VoiceError as exc:
+        return _voice_error(str(exc))
 
 
 @app.get("/api/providers")

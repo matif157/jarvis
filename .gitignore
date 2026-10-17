@@ -43,6 +43,8 @@ data/
 .cache/
 config/local.json
 .env
+# scratch dirs created by tests (cleaned up, but ignore leftovers)
+jv20-*/
 
 # Android staged Python sources (copied by Gradle)
 mobile/android/app/src/main/python/jarvis/

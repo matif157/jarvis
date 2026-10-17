@@ -1,7 +1,10 @@
 package ai.jarvis.assistant;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -19,7 +22,10 @@ public class MainActivity extends Activity {
     private static final int MAX_WAIT_MS = 180_000;
     private static final int POLL_INTERVAL_MS = 500;
 
+    private static final int MIC_PERMISSION_REQUEST = 1001;
+
     private WebView webView;
+    private static volatile MainActivity instance;
 
     private static final String LOADING_HTML =
             "<!DOCTYPE html><html><head><meta name=\"viewport\" "
@@ -39,6 +45,14 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        instance = this;
+        try {
+            ai.jarvis.assistant.voice.VoiceBridge.attach(getApplicationContext());
+            ai.jarvis.assistant.voice.WakeBridge.attach(getApplicationContext());
+        } catch (Throwable ignored) {
+            // voice is optional: the app must start without it
+        }
 
         try {
             if (!Python.isStarted()) {
@@ -71,6 +85,8 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
+        webView.addJavascriptInterface(new AndroidBridge(), "JarvisAndroid");
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -78,6 +94,43 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+    }
+
+    /** Called by WakeBridge when the wake word is detected. */
+    public static void notifyWake(String keyword) {
+        MainActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            if (activity.webView != null) {
+                String payload = org.json.JSONObject.quote(keyword);
+                activity.webView.evaluateJavascript(
+                        "window.onJarvisWake&&window.onJarvisWake(" + payload + ")",
+                        null);
+            }
+        });
+    }
+
+    /** Surface for page JS: {@code JarvisAndroid.requestMicPermission()}. */
+    class AndroidBridge {
+        @JavascriptInterface
+        public void requestMicPermission() {
+            runOnUiThread(() -> {
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(
+                            new String[]{Manifest.permission.RECORD_AUDIO},
+                            MIC_PERMISSION_REQUEST);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean micPermissionGranted() {
+            return checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
     }
 
     private void startServer() {

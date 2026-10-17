@@ -32,8 +32,10 @@
           <option value="llm">AI only</option>
           <option value="atif">Atif</option>
         </select>
+        <button id="chat-mic" title="Speak instead of typing">MIC</button>
         <input id="chat-input" placeholder="Ask Jarvis anything..." autocomplete="off">
         <button id="chat-send">SEND</button>
+        <button id="chat-speak" title="Read the last reply aloud">SAY</button>
       </div>
     </section>
 
@@ -108,6 +110,15 @@
       <div id="ondevice-info" class="hint"></div>
       <div id="ondevice-list" class="od-list"></div>
       <div id="ondevice-status" class="status"></div>
+
+      <h2 style="margin-top:32px" id="voice">Voice &amp; wake word</h2>
+      <p class="hint">Press MIC in chat to speak, SAY to hear the last reply, and say "Jarvis" to wake the app (Android, fully on-device via Picovoice Porcupine - free access key above). Speech engine is chosen under Engine selection.</p>
+      <div id="voice-info" class="hint"></div>
+      <div class="actions">
+        <button id="wake-start">START WAKE WORD</button>
+        <button id="wake-stop">STOP</button>
+      </div>
+      <div id="voice-status" class="status"></div>
 
       <h2 style="margin-top:32px">Preferences</h2>
       <label>Atif Assistant URL

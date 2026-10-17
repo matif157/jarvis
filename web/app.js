@@ -18,6 +18,8 @@ const enginesStatus = document.getElementById("engines-status");
 const ondeviceInfoEl = document.getElementById("ondevice-info");
 const ondeviceListEl = document.getElementById("ondevice-list");
 const ondeviceStatusEl = document.getElementById("ondevice-status");
+const voiceInfoEl = document.getElementById("voice-info");
+const voiceStatusEl = document.getElementById("voice-status");
 
 let selectedTool = null;
 let stream = null; // active EventSource
@@ -572,6 +574,19 @@ function renderSetup() {
     '[data-key-card="picovoice"] input'
   );
 
+  const v = voiceData;
+  if (v) {
+    const ttsOk = !!(v.tts && v.tts.available);
+    setupItem(
+      ttsOk,
+      "Voice output",
+      ttsOk
+        ? `${v.tts.provider} - press SAY to hear replies, MIC to speak`
+        : "No text-to-speech backend available.",
+      "#voice"
+    );
+  }
+
   const e = enginesData && enginesData.engines;
   if (e) {
     const allDefault =
@@ -915,6 +930,161 @@ if (ondeviceListEl) {
   });
 }
 
+/* --------------------------------------------------------------- voice */
+let voiceData = null;
+const CHAT_PLACEHOLDER = document.getElementById("chat-input").placeholder;
+
+function renderVoice(data) {
+  voiceData = data;
+  if (!voiceInfoEl) return;
+  const tts = data.tts || {};
+  const stt = data.stt || {};
+  const wake = data.wake || {};
+  const lines = [];
+  lines.push(
+    tts.available
+      ? `Speak aloud: ${tts.provider || "ready"}`
+      : "Speak aloud: no voice output available"
+  );
+  lines.push(
+    stt.available
+      ? `Transcribe: ${stt.provider} (engine: ${data.stt_engine})`
+      : data.android
+        ? `Transcribe: ready (engine: ${data.stt_engine})`
+        : "Transcribe: needs the Android app or a desktop STT backend"
+  );
+  if (!wake.supported) {
+    lines.push("Wake word: available in the Android app");
+  } else if (wake.error) {
+    lines.push(`Wake word: ${wake.error}`);
+  } else if (wake.running) {
+    lines.push(`Wake word: listening for "${wake.keyword}"`);
+  } else {
+    lines.push("Wake word: stopped");
+  }
+  voiceInfoEl.innerHTML = lines.join("<br>");
+}
+
+async function loadVoice() {
+  try {
+    const data = await (await fetch("/api/voice/status")).json();
+    renderVoice(data);
+  } catch {
+    if (voiceInfoEl) voiceInfoEl.textContent = "Could not load voice status.";
+  }
+  renderSetup();
+}
+
+async function wakeAction(action) {
+  if (!voiceStatusEl) return;
+  if (action === "start" && voiceData && !voiceData.wake_key_set) {
+    voiceStatusEl.textContent =
+      "Add your Picovoice access key first (Service API keys above).";
+    return;
+  }
+  voiceStatusEl.textContent = action === "start" ? "Starting..." : "Stopping...";
+  try {
+    const res = await fetch(`/api/wake/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword: "jarvis" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false)
+      throw new Error(data.error || `HTTP ${res.status}`);
+    voiceStatusEl.textContent =
+      action === "start" ? `Listening for "${data.keyword || "jarvis"}".` : "Stopped.";
+  } catch (err) {
+    voiceStatusEl.textContent = `Failed: ${err.message}`;
+  }
+  await loadVoice();
+}
+
+async function ensureMicPermission() {
+  const bridge = window.JarvisAndroid;
+  if (!bridge || !bridge.micPermissionGranted) return true; // desktop answers honestly
+  if (bridge.micPermissionGranted()) return true;
+  bridge.requestMicPermission();
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (bridge.micPermissionGranted()) return true;
+  }
+  return false;
+}
+
+function noteVoiceProblem(message) {
+  const input = document.getElementById("chat-input");
+  input.placeholder = message;
+  setTimeout(() => {
+    input.placeholder = CHAT_PLACEHOLDER;
+  }, 6000);
+}
+
+async function micTranscribe() {
+  const btn = document.getElementById("chat-mic");
+  const input = document.getElementById("chat-input");
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = "REC";
+  btn.classList.add("rec");
+  input.placeholder = "Listening...";
+  try {
+    if (!(await ensureMicPermission())) {
+      noteVoiceProblem("Microphone permission denied");
+      return;
+    }
+    const res = await fetch("/api/voice/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seconds: 8 }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false)
+      throw new Error(data.error || `HTTP ${res.status}`);
+    input.value = (input.value ? input.value + " " : "") + data.transcript;
+    input.focus();
+    input.placeholder = CHAT_PLACEHOLDER;
+  } catch (err) {
+    noteVoiceProblem(err.message || "voice input failed");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "MIC";
+    btn.classList.remove("rec");
+    if (input.placeholder === "Listening...") input.placeholder = CHAT_PLACEHOLDER;
+  }
+}
+
+async function speakLast() {
+  const msgs = chatLog.querySelectorAll(".msg.assistant");
+  const last = msgs[msgs.length - 1];
+  const text = last ? last.textContent.trim() : "";
+  if (!text) return;
+  try {
+    const res = await fetch("/api/voice/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false)
+      throw new Error(data.error || `HTTP ${res.status}`);
+  } catch (err) {
+    addChat("system", `Could not speak: ${err.message}`);
+  }
+}
+
+window.onJarvisWake = function (keyword) {
+  addChat("system", `Woke up on "${keyword}" - speak your command.`);
+  micTranscribe();
+};
+
+document.getElementById("chat-mic").addEventListener("click", micTranscribe);
+document.getElementById("chat-speak").addEventListener("click", speakLast);
+if (document.getElementById("wake-start")) {
+  document.getElementById("wake-start").addEventListener("click", () => wakeAction("start"));
+  document.getElementById("wake-stop").addEventListener("click", () => wakeAction("stop"));
+}
+
 async function loadSettings() {
   try {
     const s = await (await fetch("/api/settings")).json();
@@ -955,3 +1125,4 @@ loadTools();
 loadServiceKeys();
 loadEngines();
 loadOnDevice();
+loadVoice();

@@ -1,10 +1,13 @@
 """Voice I/O for Jarvis — text-to-speech and speech-to-text.
 
 Local-first and honest about availability:
-  - TTS uses the macOS ``say`` command (always available on macOS).
-  - STT is pluggable; optional backends (``whisper`` / ``speech_recognition``)
-    are used only when installed. When no backend is present, listening/
-    transcription fails with a clear message rather than faking a transcript.
+  - TTS uses the macOS ``say`` command (always available on macOS) or the
+    Android platform synthesiser through the in-app Java bridge.
+  - STT is pluggable: optional backends (``whisper`` / ``speech_recognition``)
+    run locally on the desktop, while the Android app records audio and
+    recognises speech on-device (platform recognizer) or in the cloud (Groq
+    Whisper, honouring ``engine.stt``).
+  - The wake word ("Jarvis") is provided by Porcupine inside the Android app.
 
 All providers are swappable so the rest of Jarvis (and the tests) can run
 deterministically and offline via the mock providers.
@@ -12,7 +15,9 @@ deterministically and offline via the mock providers.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
@@ -23,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .logging import get_logger
 from .permissions import PermissionManager
 from .security import is_path_safe
+from .service_keys import get_key as get_service_key
 from .tools import Tool, ToolResult
 
 logger = get_logger(__name__)
@@ -30,6 +36,290 @@ logger = get_logger(__name__)
 # Safety limits
 MAX_SPEAK_CHARS = 2000
 SPEAK_TIMEOUT_SECONDS = 60
+
+# Cloud STT (used when engine.stt is "cloud"/"auto" fallback, and for files)
+CLOUD_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+CLOUD_STT_MODEL = "whisper-large-v3-turbo"
+CLOUD_STT_TIMEOUT = 60.0
+
+# A ``voice`` argument that is really a language tag ("ur", "en-US")
+LANGUAGE_TAG_RE = re.compile(r"^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?$")
+
+
+# ---------------------------------------------------------------------------
+# Android bridges (Phase 20): platform TTS / speech recognition / wake word
+# ---------------------------------------------------------------------------
+class VoiceError(RuntimeError):
+    """Raised when a voice feature cannot run in this environment."""
+
+
+_voice_backend: Optional[Any] = None
+_wake_backend: Optional[Any] = None
+_voice_probed = False
+_voice_cache: Any = None
+_wake_probed = False
+_wake_cache: Any = None
+
+
+def set_backend(voice: Any = None, wake: Any = None) -> None:
+    """Install bridge stand-ins (tests). Objects mirror the Java static APIs."""
+    global _voice_backend, _wake_backend
+    _voice_backend = voice
+    _wake_backend = wake
+
+
+def clear_backend() -> None:
+    global _voice_backend, _wake_backend
+    global _voice_cache, _voice_probed, _wake_cache, _wake_probed
+    _voice_backend = None
+    _wake_backend = None
+    _voice_cache = None
+    _voice_probed = False
+    _wake_cache = None
+    _wake_probed = False
+
+
+def _voice_bridge() -> Any:
+    global _voice_cache, _voice_probed
+    if _voice_backend is not None:
+        return _voice_backend
+    if not _voice_probed:
+        _voice_probed = True
+        try:
+            from ai.jarvis.assistant.voice import VoiceBridge  # type: ignore
+
+            _voice_cache = VoiceBridge
+        except Exception:  # noqa: BLE001 - not running inside the Android app
+            _voice_cache = None
+    return _voice_cache
+
+
+def _wake_bridge() -> Any:
+    global _wake_cache, _wake_probed
+    if _wake_backend is not None:
+        return _wake_backend
+    if not _wake_probed:
+        _wake_probed = True
+        try:
+            from ai.jarvis.assistant.voice import WakeBridge  # type: ignore
+
+            _wake_cache = WakeBridge
+        except Exception:  # noqa: BLE001 - not running inside the Android app
+            _wake_cache = None
+    return _wake_cache
+
+
+def is_android() -> bool:
+    """True when running inside the Android app (Java bridges available)."""
+    return _voice_bridge() is not None
+
+
+def _as_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            data = json.loads(value)
+            return data if isinstance(data, dict) else {"ok": False, "error": "bad bridge payload"}
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "error": value[:200]}
+    if isinstance(value, dict):
+        return value
+    return {"ok": False, "error": "unexpected bridge return"}
+
+
+def _call(bridge: Any, method: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Invoke a bridge method (JSON in / JSON out) and normalise failures."""
+    fn = getattr(bridge, method)
+    try:
+        raw = fn(json.dumps(payload)) if payload is not None else fn()
+    except Exception as exc:  # noqa: BLE001
+        raise VoiceError(f"voice bridge failed: {exc}") from exc
+    data = _as_dict(raw)
+    if not data.get("ok"):
+        raise VoiceError(str(data.get("error") or "voice bridge error"))
+    return data
+
+
+def android_status() -> Dict[str, Any]:
+    """Platform TTS/microphone report from the Android bridge."""
+    bridge = _voice_bridge()
+    if bridge is None:
+        return {"supported": False}
+    try:
+        data = _call(bridge, "status")
+    except VoiceError as exc:
+        return {"supported": True, "error": str(exc)}
+    data["supported"] = True
+    data.setdefault("platform", "android")
+    return data
+
+
+def speak_text(
+    text: str,
+    language: Optional[str] = None,
+    rate: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Speak through the Android TTS engine (blocking until queued)."""
+    bridge = _voice_bridge()
+    if bridge is None:
+        raise VoiceError("android text-to-speech requires the Android app")
+    payload: Dict[str, Any] = {"text": (text or "")[:MAX_SPEAK_CHARS]}
+    if language:
+        payload["language"] = language
+    if rate:
+        try:
+            value = float(rate)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 4.0:  # words-per-minute style (macOS say) -> rate multiplier
+            value = value / 175.0
+        if 0.25 < value < 4.0:
+            payload["rate"] = round(value, 2)
+    return _call(bridge, "speak", payload)
+
+
+def stop_speech() -> Dict[str, Any]:
+    bridge = _voice_bridge()
+    if bridge is None:
+        raise VoiceError("android text-to-speech requires the Android app")
+    return _call(bridge, "stopSpeak")
+
+
+def list_voices(language: Optional[str] = None) -> List[str]:
+    """Voice names reported by the Android TTS engine (empty on desktop)."""
+    bridge = _voice_bridge()
+    if bridge is None:
+        return []
+    payload: Dict[str, Any] = {"language": language} if language else {}
+    try:
+        data = _call(bridge, "voices", payload)
+    except VoiceError as exc:  # pragma: no cover - OEM engine quirks
+        logger.warning(f"Failed to list android voices: {exc}")
+        return []
+    return [str(v) for v in data.get("voices", [])]
+
+
+def recognize_speech(language: Optional[str] = None, timeout_ms: Optional[int] = None) -> str:
+    """Live microphone transcription via the platform recognizer (blocking)."""
+    bridge = _voice_bridge()
+    if bridge is None:
+        raise VoiceError("live speech recognition requires the Android app")
+    payload: Dict[str, Any] = {}
+    if language:
+        payload["language"] = language
+    if timeout_ms:
+        payload["timeout_ms"] = int(timeout_ms)
+    data = _call(bridge, "recognize", payload)
+    text = str(data.get("text") or "").strip()
+    if not text:
+        raise VoiceError("nothing recognized - try speaking again")
+    return text
+
+
+def record_wav(seconds: int = 8) -> str:
+    """Record microphone audio to a WAV file (blocking); returns its path."""
+    bridge = _voice_bridge()
+    if bridge is None:
+        raise VoiceError("audio recording requires the Android app")
+    data = _call(bridge, "record", {"seconds": int(seconds)})
+    path = str(data.get("path") or "")
+    if not path:
+        raise VoiceError("recording failed")
+    return path
+
+
+def cloud_transcribe(
+    audio_path: str,
+    language: Optional[str] = None,
+    check_path: bool = True,
+) -> Tuple[bool, str]:
+    """Transcribe a file with Groq's Whisper. Needs a Groq API key.
+
+    ``check_path=False`` is used only for recordings produced by our own
+    bridge (their location is fixed by Java, outside the usual safe bases).
+    """
+    if check_path and (not is_path_safe(audio_path) or not Path(audio_path).exists()):
+        return False, "audio file not found or not allowed"
+    from . import llm  # local import: llm must not load for every voice call
+
+    key = llm.provider_key("groq")
+    if not key:
+        return False, "cloud transcription needs a Groq API key (Settings > Service API keys)"
+    try:
+        import httpx
+
+        form: Dict[str, Any] = {"model": CLOUD_STT_MODEL}
+        if language:
+            form["language"] = language.split("-")[0]
+        with open(audio_path, "rb") as fh:
+            resp = httpx.post(
+                CLOUD_STT_URL,
+                headers={"Authorization": f"Bearer {key}"},
+                files={"file": (Path(audio_path).name, fh, "audio/wav")},
+                data=form,
+                timeout=CLOUD_STT_TIMEOUT,
+            )
+        if resp.status_code != 200:
+            detail = ""
+            try:
+                detail = str(resp.json().get("error", {}).get("message", ""))
+            except Exception:  # noqa: BLE001
+                pass
+            logger.warning(f"Groq transcription failed: HTTP {resp.status_code} {detail[:120]}")
+            return False, f"cloud transcription failed (HTTP {resp.status_code})"
+        text = str(resp.json().get("text", "")).strip()
+        if not text:
+            return False, "nothing recognized in the recording"
+        return True, text
+    except Exception as exc:  # noqa: BLE001 - network/provider failures
+        return False, f"cloud transcription failed: {exc}"
+
+
+def wake_start(access_key: str, keyword: str = "jarvis") -> Dict[str, Any]:
+    """Start Porcupine wake-word listening inside the Android app."""
+    bridge = _wake_bridge()
+    if bridge is None:
+        raise VoiceError("wake word requires the Android app")
+    if not access_key:
+        raise VoiceError(
+            "a Picovoice access key is required (Settings > Service API keys)"
+        )
+    return _call(
+        bridge,
+        "start",
+        {"access_key": access_key, "keyword": (keyword or "jarvis").strip().lower()},
+    )
+
+
+def wake_stop() -> Dict[str, Any]:
+    bridge = _wake_bridge()
+    if bridge is None:
+        raise VoiceError("wake word requires the Android app")
+    return _call(bridge, "stop")
+
+
+def wake_status() -> Dict[str, Any]:
+    """Wake-word state; ``supported`` is false off-device."""
+    bridge = _wake_bridge()
+    if bridge is None:
+        return {"supported": False}
+    try:
+        data = _call(bridge, "status")
+    except VoiceError as exc:
+        return {"supported": True, "error": str(exc)}
+    data["supported"] = True
+    return data
+
+
+def wake_keywords() -> List[str]:
+    """Built-in wake words offered by the Porcupine Android SDK."""
+    bridge = _wake_bridge()
+    if bridge is None:
+        return []
+    try:
+        data = _call(bridge, "keywords")
+    except VoiceError:  # pragma: no cover - bridge quirk
+        return []
+    return [str(k) for k in data.get("keywords", [])]
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +420,36 @@ class MockTTS(TextToSpeechProvider):
             return False, "nothing to speak"
         self.spoken.append({"text": text, "voice": voice, "rate": rate})
         return True, "spoken"
+
+
+class AndroidTTS(TextToSpeechProvider):
+    """Android platform synthesiser through the in-app Java bridge."""
+
+    @property
+    def name(self) -> str:
+        return "android_tts"
+
+    def available(self) -> bool:
+        return is_android()
+
+    def voices(self) -> List[str]:
+        if not self.available():
+            return []
+        return list_voices()
+
+    def speak(self, text: str, voice: Optional[str] = None, rate: Optional[int] = None) -> Tuple[bool, str]:
+        if not self.available():
+            return False, "android text-to-speech is not available here"
+        if not text or not text.strip():
+            return False, "nothing to speak"
+        # ``voice`` may be a language tag ("ur", "en-US"); anything else is
+        # ignored because the platform engine selects voices itself.
+        language = voice if voice and LANGUAGE_TAG_RE.match(voice) else None
+        try:
+            speak_text(text, language=language, rate=rate)
+            return True, "spoken"
+        except VoiceError as exc:
+            return False, str(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +554,30 @@ class MockSTT(SpeechToTextProvider):
         return True, self.transcript
 
 
+class AndroidSTT(SpeechToTextProvider):
+    """Android platform speech recognizer (live microphone, on-device)."""
+
+    @property
+    def name(self) -> str:
+        return "android_speech"
+
+    def available(self) -> bool:
+        return is_android()
+
+    def transcribe(self, audio_path: Optional[str] = None) -> Tuple[bool, str]:
+        if not self.available():
+            return False, "android speech recognition is not available here"
+        if audio_path:
+            return False, (
+                "on-device recognition needs live audio; "
+                "transcribe files with a cloud STT key"
+            )
+        try:
+            return True, recognize_speech()
+        except VoiceError as exc:
+            return False, str(exc)
+
+
 # ---------------------------------------------------------------------------
 # Manager
 # ---------------------------------------------------------------------------
@@ -250,11 +594,17 @@ class VoiceManager:
 
     @staticmethod
     def _default_tts() -> TextToSpeechProvider:
+        android = AndroidTTS()
+        if android.available():
+            return android
         mac = MacSayTTS()
         return mac if mac.available() else MockTTS()
 
     @staticmethod
     def _default_stt() -> Optional[SpeechToTextProvider]:
+        android = AndroidSTT()
+        if android.available():
+            return android
         for provider in (WhisperSTT(), SpeechRecognitionSTT()):
             if provider.available():
                 return provider
@@ -280,6 +630,100 @@ class VoiceManager:
                 "available": self.stt is not None and self.stt.available(),
             },
         }
+
+
+# ---------------------------------------------------------------------------
+# Orchestrators (Phase 20): engine routing + combined status
+# ---------------------------------------------------------------------------
+def status_payload() -> Dict[str, Any]:
+    """Combined voice report for ``GET /api/voice/status``."""
+    from . import engines
+
+    try:
+        base = VoiceManager().status()
+    except Exception:  # noqa: BLE001 - a broken provider must not 500 the UI
+        base = {"tts": {"available": False}, "stt": {"available": False}}
+    out: Dict[str, Any] = {
+        "ok": True,
+        "android": is_android(),
+        "tts": base.get("tts", {}),
+        "stt": base.get("stt", {}),
+        "stt_engine": engines.get("stt") or "auto",
+        "wake": wake_status(),
+        "wake_key_set": bool(get_service_key("picovoice")),
+        "wake_keywords": wake_keywords(),
+    }
+    if out["android"]:
+        out["device"] = android_status()
+    return out
+
+
+def transcribe_live(
+    language: Optional[str] = None,
+    seconds: int = 8,
+    mode: Optional[str] = None,
+) -> Tuple[bool, str, str]:
+    """Live transcription honouring ``engine.stt``.
+
+    Returns ``(ok, transcript_or_error, provider)``.
+    """
+    from . import engines
+
+    if mode is None:
+        mode = engines.get("stt") or "auto"
+
+    if mode == "cloud":
+        if not is_android():
+            return False, "live capture requires the Android app", "cloud"
+        try:
+            path = record_wav(seconds)
+        except VoiceError as exc:
+            return False, str(exc), "cloud"
+        ok, text = cloud_transcribe(path, language, check_path=False)
+        return ok, text, "groq_whisper"
+
+    # on_device / auto: prefer the platform recognizer, then fall back.
+    if is_android():
+        try:
+            return True, recognize_speech(language=language), "android_speech"
+        except VoiceError as exc:
+            if mode == "on_device":
+                return False, str(exc), "android_speech"
+            try:
+                path = record_wav(seconds)
+            except VoiceError as rec_exc:
+                return False, f"{exc}; fallback recording failed: {rec_exc}", "cloud"
+            ok, text = cloud_transcribe(path, language, check_path=False)
+            if ok:
+                return True, text, "groq_whisper"
+            return False, f"{exc}; cloud fallback failed: {text}", "cloud"
+
+    reason = (
+        "on-device speech recognition requires the Android app"
+        if mode == "on_device"
+        else "live capture requires the Android app"
+    )
+    return False, reason, mode
+
+
+def transcribe_file(
+    audio_path: str,
+    language: Optional[str] = None,
+) -> Tuple[bool, str, str]:
+    """File transcription: installed desktop STT when present, else cloud.
+
+    Returns ``(ok, transcript_or_error, provider)``.
+    """
+    if not is_path_safe(audio_path) or not Path(audio_path).exists():
+        return False, "audio file not found or not allowed", "local"
+    manager = VoiceManager()
+    stt = manager.stt
+    if stt is not None and stt.name in {"whisper", "speech_recognition"} and stt.available():
+        ok, text = stt.transcribe(audio_path)
+        if ok or "not installed" not in text:
+            return ok, text, stt.name
+    ok, text = cloud_transcribe(audio_path, language)
+    return ok, text, "groq_whisper"
 
 
 # ---------------------------------------------------------------------------
