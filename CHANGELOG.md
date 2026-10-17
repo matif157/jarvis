@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-17 (Phase 18 - Guided key setup & engine manager)
+- **New `jarvis/service_keys.py`**: local storage for non-LLM service tokens (`hf`, `picovoice`) under `secret.<name>` in the settings table — masked (`…abcd`) in every payload, raw value never returned by any endpoint.
+- **New `jarvis/engines.py`**: validated engine selection per component (`llm`: auto/cloud/on_device, `stt`: on_device/cloud/auto, `image`: local/cloud/off), persisted under `engine.<name>`; invalid values are rejected before reaching the DB. Consumers land with their phases (on-device LLM, mobile voice, local image service).
+- **New endpoints**: `GET /api/keys` + `POST /api/keys/{name}` (save/clear service keys, 404 on unknown) and `GET /api/engines` + `POST /api/engines` (partial updates; invalid choice → 400).
+- **Hardened `/api/settings`**: both read and write now skip `provider.*`, `secret.*` and `engine.*` prefixes, closing the gap where generic settings writes could have stored a secret (previously only `provider.*` was filtered on read).
+- **Settings UI**: guided **Setup status** checklist (chat provider / HF token / Picovoice key / engine choices, clickable to jump to the fix), **Service API keys** cards, and **Engine selection** dropdowns — all persisted via the new endpoints.
+- Added `tests/test_phase18_settings_engine.py` (6 offline checks incl. leak-proofing of `secret.*`/`engine.*`).
+- Full regression suite passes (**349 tests across 34 modules**).
+
 ## 2026-10-17 (Phase 17 - Transparent Agent Console / live timeline)
 - **New event bus** `jarvis/events.py`: dependency-free, sync-or-async `EventEmitter` that never lets instrumentation break the actual work (handler errors are swallowed). Event types: `start`, `thought`, `confirmation`, `tool_call`, `tool_result`, `message`, `error`, `done`.
 - **Action loop instrumentation** (`jarvis/action_loop.py`): emits `thought` → `confirmation` (when gated) → `tool_call` → `tool_result` (with `duration_ms` and `needs_confirmation`) for every tool step. Behaviour is unchanged when no handler is attached.

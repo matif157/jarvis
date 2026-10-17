@@ -78,13 +78,30 @@
 
     <!-- SETTINGS -->
     <section id="tab-settings" class="panel">
-      <h2>Models &amp; API keys</h2>
+      <h2>Setup status</h2>
+      <p class="hint">What Jarvis needs to be fully live. Click an unfinished item to jump to it.</p>
+      <ul id="setup-checklist" class="checklist"></ul>
+
+      <h2 style="margin-top:32px">Chat models (API keys)</h2>
       <p class="hint">Paste a key, test it, then save. Keys are stored locally and shown masked.</p>
       <div id="providers-list" class="providers"></div>
       <div class="actions">
         <button id="test-all-providers">TEST ALL</button>
       </div>
       <div id="providers-status" class="status"></div>
+
+      <h2 style="margin-top:32px" id="service-keys">Service API keys</h2>
+      <p class="hint">Tokens for auxiliary features (image generation, wake word). Stored on this device only, shown masked, never returned in full.</p>
+      <div id="service-keys-list" class="providers"></div>
+      <div id="service-keys-status" class="status"></div>
+
+      <h2 style="margin-top:32px" id="engines">Engine selection</h2>
+      <p class="hint">Where each model runs. Choices are saved now and take effect as each feature becomes available.</p>
+      <div id="engines-list" class="engines"></div>
+      <div class="actions">
+        <button id="save-engines">SAVE ENGINES</button>
+      </div>
+      <div id="engines-status" class="status"></div>
 
       <h2 style="margin-top:32px">Preferences</h2>
       <label>Atif Assistant URL

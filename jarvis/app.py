@@ -16,12 +16,17 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, llm
+from . import db, engines, llm, service_keys
 from . import __version__
 from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
 
 app = FastAPI(title="Jarvis", version=__version__)
+
+# Prefixes whose values are never accepted by (or returned from) /api/settings:
+# provider.* -> handled by /api/providers, secret.* -> /api/keys,
+# engine.* -> /api/engines (validated there).
+_HIDDEN_PREFIXES = ("provider.", "secret.", "engine.")
 
 
 class Ask(BaseModel):
@@ -47,6 +52,17 @@ class ProviderIn(BaseModel):
     url: Optional[str] = None
     clear_key: bool = False
     enabled: Optional[bool] = None
+
+
+class ServiceKeyIn(BaseModel):
+    api_key: Optional[str] = None
+    clear_key: bool = False
+
+
+class EnginesIn(BaseModel):
+    llm: Optional[str] = None
+    stt: Optional[str] = None
+    image: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -202,21 +218,64 @@ def get_settings() -> dict:
     conn = db.connect()
     rows = conn.execute("SELECT key, value FROM settings").fetchall()
     conn.close()
-    # Provider keys are never returned here.
+    # Provider keys, service secrets and engine choices are never returned here.
     return {
         r["key"]: r["value"]
         for r in rows
-        if not r["key"].startswith("provider.")
+        if not r["key"].startswith(_HIDDEN_PREFIXES)
     }
 
 
 @app.post("/api/settings")
 def set_settings(payload: dict) -> dict:
     for k, v in payload.items():
-        if v is None or str(k).startswith("provider."):
+        if v is None or str(k).startswith(_HIDDEN_PREFIXES):
             continue
         db.set_setting(str(k), str(v))
     return {"ok": True}
+
+
+@app.get("/api/keys")
+def get_service_keys() -> dict:
+    """Masked status of non-LLM service keys (Hugging Face, Picovoice)."""
+    return {"keys": service_keys.list_keys()}
+
+
+@app.post("/api/keys/{name}")
+def save_service_key(name: str, payload: ServiceKeyIn) -> JSONResponse:
+    """Save or clear one service key. The secret itself is never echoed back."""
+    if not service_keys.is_known(name):
+        return JSONResponse({"error": "unknown key"}, status_code=404)
+    if payload.clear_key:
+        service_keys.delete_key(name)
+    elif payload.api_key:
+        service_keys.set_key(name, payload.api_key)
+    return JSONResponse({"ok": True, "key": service_keys.status(name)})
+
+
+@app.get("/api/engines")
+def get_engines() -> dict:
+    """Engine choices (cloud vs on-device) with options and defaults."""
+    return {"engines": engines.snapshot()}
+
+
+@app.post("/api/engines")
+def set_engines(payload: EnginesIn) -> JSONResponse:
+    """Persist engine choices; unknown components or values are rejected."""
+    updates = {k: v for k, v in payload.dict().items() if v is not None}
+    bad = [
+        f"{k}={v}"
+        for k, v in updates.items()
+        if not engines.valid(k, v)
+    ]
+    if bad:
+        return JSONResponse(
+            {"error": f"invalid engine choice(s): {', '.join(bad)}"},
+            status_code=400,
+        )
+    for k, v in updates.items():
+        engines.set(k, v)
+    return JSONResponse({"ok": True, "engines": engines.snapshot()})
 
 
 @app.get("/api/providers")

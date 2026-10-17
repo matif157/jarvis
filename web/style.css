@@ -216,3 +216,23 @@ label.inline { flex-direction: row; align-items: center; gap: 8px; text-transfor
 }
 .trace-step.failed { color: var(--warn); }
 
+/* setup checklist */
+.checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ck-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.ck-mark { flex: 0 0 16px; font-size: 13px; line-height: 1.4; color: var(--warn); }
+.ck-item.ok .ck-mark { color: var(--acc); }
+.ck-body { display: flex; flex-direction: column; gap: 2px; }
+.ck-body strong { font-size: 13px; }
+.ck-item.todo .ck-body strong { color: var(--warn); }
+.ck-body small { font-size: 11px; color: var(--dim); }
+.ck-item.clickable { cursor: pointer; }
+.ck-item.clickable:hover { border-color: var(--acc); }
+

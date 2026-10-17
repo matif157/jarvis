@@ -11,9 +11,19 @@ const toolConfirm = document.getElementById("tool-confirm");
 const toolResult = document.getElementById("tool-result");
 const toolRun = document.getElementById("tool-run");
 const toolRunnerName = document.getElementById("tool-runner-name");
+const checklistEl = document.getElementById("setup-checklist");
+const serviceKeysEl = document.getElementById("service-keys-list");
+const enginesEl = document.getElementById("engines-list");
+const enginesStatus = document.getElementById("engines-status");
 
 let selectedTool = null;
 let stream = null; // active EventSource
+
+/* data for the setup checklist (loaded by the fetches below) */
+let statusData = null;
+let providersData = [];
+let serviceKeysData = [];
+let enginesData = null;
 
 /* ---------------------------------------------------------------- tabs */
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -29,12 +39,14 @@ document.querySelectorAll(".tab").forEach((tab) => {
 async function loadStatus() {
   try {
     const s = await (await fetch("/api/status")).json();
+    statusData = s;
     const tts = s.voice && s.voice.tts && s.voice.tts.available ? "tts" : "no-tts";
     const stt = s.voice && s.voice.stt && s.voice.stt.available ? "stt" : "no-stt";
     statusLine.textContent = `${s.tools} tools - ${s.has_provider ? "AI ready" : "offline"} - ${tts} - ${stt}`;
   } catch {
     statusLine.textContent = "offline";
   }
+  renderSetup();
 }
 
 /* --------------------------------------------------------------- agent */
@@ -468,11 +480,13 @@ async function testProvider(card) {
 async function loadProviders() {
   try {
     const data = await (await fetch("/api/providers")).json();
+    providersData = data.providers || [];
     providersEl.innerHTML = "";
     for (const p of data.providers) providersEl.appendChild(renderProvider(p));
   } catch {
     providersEl.textContent = "Could not load providers.";
   }
+  renderSetup();
 }
 
 document.getElementById("test-all-providers").addEventListener("click", async () => {
@@ -494,6 +508,218 @@ document.getElementById("test-all-providers").addEventListener("click", async ()
     providersStatus.textContent = `Test failed: ${err.message}`;
   }
 });
+
+/* ----------------------------------------------------- setup checklist */
+function setupItem(ok, text, hint, target) {
+  const li = document.createElement("li");
+  li.className = "ck-item " + (ok ? "ok" : "todo");
+  const mark = document.createElement("span");
+  mark.className = "ck-mark";
+  mark.textContent = ok ? "✓" : "○";
+  const body = document.createElement("div");
+  body.className = "ck-body";
+  const strong = document.createElement("strong");
+  strong.textContent = text;
+  const small = document.createElement("small");
+  small.textContent = hint;
+  body.append(strong, small);
+  li.append(mark, body);
+  if (!ok && target) {
+    li.classList.add("clickable");
+    li.addEventListener("click", () => {
+      const el = document.querySelector(target);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        try { el.focus({ preventScroll: true }); } catch { el.focus(); }
+      }
+    });
+  }
+  checklistEl.appendChild(li);
+}
+
+function renderSetup() {
+  if (!checklistEl) return;
+  checklistEl.innerHTML = "";
+
+  const chatOk = !!(statusData && statusData.has_provider);
+  setupItem(
+    chatOk,
+    "Chat provider",
+    chatOk
+      ? "configured - Jarvis can answer with AI"
+      : "Add a key under Chat models (Groq / OpenRouter / Gemini) or configure Ollama.",
+    "#providers-list input"
+  );
+
+  const hf = serviceKeysData.find((k) => k.name === "hf") || {};
+  setupItem(
+    !!hf.key_set,
+    "Hugging Face token",
+    hf.key_set ? `saved (${hf.key_hint})` : "Paste a token - image generation and model downloads.",
+    '[data-key-card="hf"] input'
+  );
+
+  const pv = serviceKeysData.find((k) => k.name === "picovoice") || {};
+  setupItem(
+    !!pv.key_set,
+    "Picovoice access key",
+    pv.key_set ? `saved (${pv.key_hint})` : "Paste your access key - wake-word detection.",
+    '[data-key-card="picovoice"] input'
+  );
+
+  const e = enginesData && enginesData.engines;
+  if (e) {
+    const allDefault =
+      e.llm.value === e.llm.default &&
+      e.stt.value === e.stt.default &&
+      e.image.value === e.image.default;
+    setupItem(
+      true,
+      "Engine choices",
+      `chat ${e.llm.value} - voice ${e.stt.value} - image ${e.image.value}` +
+        (allDefault ? " (defaults)" : ""),
+      null
+    );
+  }
+}
+
+/* ---------------------------------------------------- service API keys */
+function renderServiceKey(k) {
+  const card = document.createElement("div");
+  card.className = "pcard";
+  card.dataset.keyCard = k.name;
+
+  const head = document.createElement("div");
+  head.className = "phead";
+  const title = document.createElement("strong");
+  title.textContent = k.label;
+  const b = document.createElement("span");
+  b.className = "pbadge" + (k.key_set ? " pok" : "");
+  b.textContent = k.key_set ? "SET" : "NOT SET";
+  head.append(title, b);
+  card.appendChild(head);
+
+  const note = document.createElement("div");
+  note.className = "pnote";
+  note.textContent = (k.hint || "") + (k.used_for ? ` - ${k.used_for}` : "");
+  card.appendChild(note);
+
+  const row = document.createElement("label");
+  row.textContent = "API key";
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.dataset.role = "key";
+  input.placeholder = k.key_set ? `saved (${k.key_hint}) - type to replace` : "paste key";
+  row.appendChild(input);
+  card.appendChild(row);
+
+  const actions = document.createElement("div");
+  actions.className = "form-actions";
+  const save = document.createElement("button");
+  save.textContent = "SAVE";
+  const clear = document.createElement("button");
+  clear.textContent = "CLEAR";
+  actions.append(save, clear);
+  card.appendChild(actions);
+
+  const msg = document.createElement("div");
+  msg.className = "pnote";
+  msg.dataset.role = "note";
+  card.appendChild(msg);
+
+  save.addEventListener("click", () => saveServiceKey(card, false));
+  clear.addEventListener("click", () => saveServiceKey(card, true));
+  return card;
+}
+
+async function loadServiceKeys() {
+  try {
+    const data = await (await fetch("/api/keys")).json();
+    serviceKeysData = data.keys || [];
+    serviceKeysEl.innerHTML = "";
+    for (const k of serviceKeysData) serviceKeysEl.appendChild(renderServiceKey(k));
+  } catch {
+    serviceKeysEl.textContent = "Could not load service keys.";
+  }
+  renderSetup();
+}
+
+async function saveServiceKey(card, clear) {
+  const name = card.dataset.keyCard;
+  const note = card.querySelector('[data-role="note"]');
+  const input = card.querySelector('[data-role="key"]');
+  const value = input ? input.value.trim() : "";
+  if (!clear && !value) {
+    note.textContent = "Nothing to save - paste a key first.";
+    return;
+  }
+  note.textContent = clear ? "Clearing..." : "Saving...";
+  try {
+    const res = await fetch(`/api/keys/${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(clear ? { clear_key: true } : { api_key: value }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "failed");
+    note.textContent = clear ? "Key cleared." : "Saved.";
+    if (input) input.value = "";
+    await loadServiceKeys();
+  } catch (err) {
+    note.textContent = `Failed: ${err.message}`;
+  }
+}
+
+/* --------------------------------------------------- engine selection */
+function renderEngines(data) {
+  enginesEl.innerHTML = "";
+  for (const [name, spec] of Object.entries(data.engines || {})) {
+    const label = document.createElement("label");
+    label.textContent = `${spec.label} - ${spec.description}`;
+    const select = document.createElement("select");
+    select.dataset.engine = name;
+    for (const o of spec.options) {
+      const opt = document.createElement("option");
+      opt.value = o.value;
+      opt.textContent = o.label;
+      if (o.value === spec.value) opt.selected = true;
+      select.appendChild(opt);
+    }
+    label.appendChild(select);
+    enginesEl.appendChild(label);
+  }
+}
+
+async function loadEngines() {
+  try {
+    const data = await (await fetch("/api/engines")).json();
+    enginesData = data;
+    renderEngines(data);
+  } catch {
+    enginesEl.textContent = "Could not load engine options.";
+  }
+  renderSetup();
+}
+
+async function saveEngines() {
+  const body = {};
+  enginesEl.querySelectorAll("select[data-engine]").forEach((s) => {
+    body[s.dataset.engine] = s.value;
+  });
+  enginesStatus.textContent = "Saving...";
+  try {
+    const res = await fetch("/api/engines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "save failed");
+    enginesStatus.textContent = "Saved.";
+    await loadEngines();
+  } catch (err) {
+    enginesStatus.textContent = `Failed: ${err.message}`;
+  }
+}
 
 async function loadSettings() {
   try {
@@ -526,7 +752,11 @@ document.getElementById("save-settings").addEventListener("click", async () => {
   }
 });
 
+document.getElementById("save-engines").addEventListener("click", saveEngines);
+
 loadStatus();
 loadProviders();
 loadSettings();
 loadTools();
+loadServiceKeys();
+loadEngines();
