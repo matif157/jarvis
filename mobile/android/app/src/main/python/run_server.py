@@ -36,7 +36,9 @@ def start(files_dir, host="127.0.0.1", port=8771):
 
         def _run():
             try:
-                config = uvicorn.Config(app, host=host, port=port, log_level="error", access_log=False)
+                log_level = os.environ.get("JARVIS_UVICORN_LOG", "error")
+                access_log = os.environ.get("JARVIS_UVICORN_ACCESS", "0") in ("1", "true", "yes")
+                config = uvicorn.Config(app, host=host, port=port, log_level=log_level, access_log=access_log)
                 server = uvicorn.Server(config)
                 server.run()
             except Exception as e:

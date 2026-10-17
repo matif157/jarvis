@@ -12,10 +12,15 @@ import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
 public class MainActivity extends Activity {
+    private static final String HOME_URL = "http://127.0.0.1:8771/";
+    private static final int RETRY_DELAY_MS = 500;
+    private static final int MAX_ATTEMPTS = 60;
+
     private WebView webView;
     private Handler handler;
     private int attempts = 0;
-    private static final int MAX_ATTEMPTS = 120;
+    private boolean loaded = false;
+    private boolean loadScheduled = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,7 +35,7 @@ public class MainActivity extends Activity {
 
         startServer();
         setupWebView();
-        tryLoad();
+        scheduleLoad();
     }
 
     private void setupWebView() {
@@ -42,11 +47,26 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 view.loadUrl(url);
                 return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                // First successful load means the embedded server is up; stop retrying.
+                loaded = true;
+            }
+
+            @Override
+            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                // Server not ready yet — keep retrying until MAX_ATTEMPTS.
+                if (!loaded) {
+                    scheduleLoad();
+                }
             }
         });
     }
@@ -62,16 +82,20 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void tryLoad() {
+    private void scheduleLoad() {
+        if (loaded || loadScheduled || attempts >= MAX_ATTEMPTS) {
+            return;
+        }
+        loadScheduled = true;
         handler.postDelayed(() -> {
-            if (attempts < MAX_ATTEMPTS) {
-                attempts++;
-                if (webView != null) {
-                    webView.loadUrl("http://127.0.0.1:8771/");
-                }
-                tryLoad();
+            loadScheduled = false;
+            if (loaded || webView == null) {
+                return;
             }
-        }, 500);
+            attempts++;
+            webView.loadUrl(HOME_URL);
+            scheduleLoad();
+        }, RETRY_DELAY_MS);
     }
 
     @Override

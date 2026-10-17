@@ -19,10 +19,13 @@ android {
         python {
             version "3.12"
             pip {
-                install "fastapi"
-                install "uvicorn"
+                // Pin pydantic v1 (pure Python). Pydantic v2 depends on the
+                // native pydantic-core extension, which Chaquopy resolves to a
+                // host (darwin) wheel that cannot load on Android.
+                install "fastapi==0.115.6"
+                install "uvicorn==0.32.1"
                 install "httpx"
-                install "pydantic"
+                install "pydantic==1.10.18"
                 install "python-dateutil"
                 install "jinja2"
                 install "python-dotenv"

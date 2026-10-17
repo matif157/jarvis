@@ -48,3 +48,5 @@ config/local.json
 mobile/android/app/src/main/python/jarvis/
 mobile/android/app/src/main/python/web/
 jarvis.apk
+mobile/android/app/build/
+mobile/android/.gradle/
