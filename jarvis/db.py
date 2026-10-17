@@ -81,6 +81,24 @@ CREATE TABLE IF NOT EXISTS messages (
     labels TEXT DEFAULT '{}',
     created_at TEXT NOT NULL
 );
+
+-- Ingested memory items (Phase 21): facts/notes with source, tags and dedupe
+CREATE TABLE IF NOT EXISTS memory_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT UNIQUE NOT NULL,
+    text TEXT NOT NULL,
+    key TEXT DEFAULT '',
+    kind TEXT DEFAULT 'fact',
+    source TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
+    session TEXT DEFAULT '',
+    hash TEXT UNIQUE NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_items_source ON memory_items(source);
+CREATE INDEX IF NOT EXISTS idx_memory_items_hash ON memory_items(hash);
 """
 
 
@@ -234,6 +252,133 @@ def get_all_memory_db() -> Dict[str, Any]:
         except Exception:
             result[r["key"]] = {"value": r["value"], "updated_at": r["updated_at"]}
     return result
+
+
+# Ingested memory items (Phase 21)
+def _memory_item_row(r: sqlite3.Row) -> Dict[str, Any]:
+    return {
+        "item_id": r["item_id"],
+        "text": r["text"],
+        "key": r["key"] or "",
+        "kind": r["kind"] or "fact",
+        "source": r["source"] or "",
+        "tags": [t for t in (r["tags"] or "").split(",") if t],
+        "session": r["session"] or "",
+        "created_at": r["created_at"],
+        "updated_at": r["updated_at"],
+    }
+
+
+def add_memory_item_db(item: Dict[str, Any]) -> bool:
+    """Insert one memory item, ignoring duplicates (same hash). True if added."""
+    tags = item.get("tags") or []
+    if isinstance(tags, str):
+        tags = [t for t in tags.split(",") if t]
+    ts = item.get("created_at") or now()
+    conn = connect()
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO memory_items
+           (item_id, text, key, kind, source, tags, session, hash, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            item["item_id"],
+            item["text"],
+            item.get("key", ""),
+            item.get("kind", "fact"),
+            item.get("source", ""),
+            ",".join(tags),
+            item.get("session", ""),
+            item["hash"],
+            ts,
+            ts,
+        ),
+    )
+    conn.commit()
+    added = cur.rowcount > 0
+    conn.close()
+    return added
+
+
+def list_memory_items_db(source: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+    conn = connect()
+    if source:
+        rows = conn.execute(
+            "SELECT * FROM memory_items WHERE source=? ORDER BY created_at DESC, id DESC LIMIT ?",
+            (source, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM memory_items ORDER BY created_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [_memory_item_row(r) for r in rows]
+
+
+def get_memory_item_db(item_id: str) -> Optional[Dict[str, Any]]:
+    conn = connect()
+    row = conn.execute("SELECT * FROM memory_items WHERE item_id=?", (item_id,)).fetchone()
+    conn.close()
+    return _memory_item_row(row) if row else None
+
+
+def delete_memory_item_db(item_id: str) -> bool:
+    conn = connect()
+    cur = conn.execute("DELETE FROM memory_items WHERE item_id=?", (item_id,))
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def delete_memory_items_by_source_db(source: str) -> int:
+    conn = connect()
+    cur = conn.execute("DELETE FROM memory_items WHERE source=?", (source,))
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
+
+
+def clear_memory_items_db() -> int:
+    conn = connect()
+    cur = conn.execute("DELETE FROM memory_items")
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
+
+
+def memory_item_facets_db() -> Dict[str, List[Dict[str, Any]]]:
+    """Distinct sources, tags and kinds with counts."""
+    conn = connect()
+    rows = conn.execute("SELECT source, tags, kind FROM memory_items").fetchall()
+    conn.close()
+    sources: Dict[str, int] = {}
+    tags: Dict[str, int] = {}
+    kinds: Dict[str, int] = {}
+    for r in rows:
+        s = r["source"] or "(none)"
+        sources[s] = sources.get(s, 0) + 1
+        k = r["kind"] or "fact"
+        kinds[k] = kinds.get(k, 0) + 1
+        for t in (r["tags"] or "").split(","):
+            if t:
+                tags[t] = tags.get(t, 0) + 1
+    return {
+        "sources": sorted(
+            ({"source": k, "count": v} for k, v in sources.items()),
+            key=lambda x: (-x["count"], x["source"]),
+        ),
+        "tags": sorted(
+            ({"tag": k, "count": v} for k, v in tags.items()),
+            key=lambda x: (-x["count"], x["tag"]),
+        ),
+        "kinds": sorted(
+            ({"kind": k, "count": v} for k, v in kinds.items()),
+            key=lambda x: (-x["count"], x["kind"]),
+        ),
+    }
 
 
 # Messages

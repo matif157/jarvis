@@ -172,6 +172,13 @@ class Assistant:
             db.save_message(self.session, "assistant", answer)
         except Exception:
             pass
+        # Optional: passively capture durable facts the user states (Phase 21).
+        try:
+            from . import memory_ingest
+
+            memory_ingest.auto_ingest_turn(query, session=self.session)
+        except Exception:
+            pass
 
     async def answer_with_tools(self, query: str) -> str:
         """Route a query: LLM router first, NLU shortcuts only in basic mode."""

@@ -336,6 +336,52 @@ class MemoryForgetTool(Tool):
         return ToolResult(success=True, result={"key": key, "forgot": True}, tool=self.name)
 
 
+class MemoryIngestTool(Tool):
+    name = "memory.ingest"
+    description = "Extract and store facts/notes from a block of text (with source and tags)"
+    permissions = ["memory.write"]
+
+    def run(self, text: str, source: str = "", tags: str = "") -> ToolResult:
+        from . import memory_ingest
+
+        if not (text or "").strip():
+            return ToolResult(success=False, error="text is required", tool=self.name)
+        result = memory_ingest.ingest_text(text, source=source, tags=tags)
+        return ToolResult(success=True, result=result, tool=self.name)
+
+
+class MemorySearchTool(Tool):
+    name = "memory.search"
+    description = "Search stored memory items by query, tag or source"
+    permissions = ["memory.read"]
+
+    def run(self, query: str = "", tag: str = "", source: str = "", limit: int = 20) -> ToolResult:
+        from . import memory_ingest
+
+        results = memory_ingest.search(
+            query=query, tags=tag or None, source=source or None, limit=int(limit or 20)
+        )
+        return ToolResult(
+            success=True, result={"count": len(results), "items": results}, tool=self.name
+        )
+
+
+class MemoryImportTool(Tool):
+    name = "memory.import"
+    description = "Import memory items from a JSON, CSV, Markdown or text file"
+    permissions = ["memory.write"]
+    resource_kwarg = "path"
+
+    def run(self, path: str, source: str = "") -> ToolResult:
+        from . import memory_ingest
+
+        try:
+            result = memory_ingest.import_file(path, source=source or None)
+        except memory_ingest.MemoryError as exc:
+            return ToolResult(success=False, error=str(exc), tool=self.name)
+        return ToolResult(success=True, result=result, tool=self.name)
+
+
 class FindFilesTool(Tool):
     name = "fs.find"
     description = "Find files matching a filename pattern in allowed directories"
@@ -419,6 +465,9 @@ def get_enhanced_registry() -> ToolRegistry:
         MemoryRecallTool(),
         MemoryListTool(),
         MemoryForgetTool(),
+        MemoryIngestTool(),
+        MemorySearchTool(),
+        MemoryImportTool(),
     ):
         reg.register(tool)
 

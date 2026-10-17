@@ -20,6 +20,14 @@ const ondeviceListEl = document.getElementById("ondevice-list");
 const ondeviceStatusEl = document.getElementById("ondevice-status");
 const voiceInfoEl = document.getElementById("voice-info");
 const voiceStatusEl = document.getElementById("voice-status");
+const memQueryEl = document.getElementById("mem-query");
+const memTagEl = document.getElementById("mem-tag");
+const memSourceEl = document.getElementById("mem-source");
+const memListEl = document.getElementById("mem-list");
+const memFacetsEl = document.getElementById("mem-facets");
+const memStatusEl = document.getElementById("mem-status");
+const memSummaryEl = document.getElementById("mem-summary");
+const memAutoEl = document.getElementById("mem-auto");
 
 let selectedTool = null;
 let stream = null; // active EventSource
@@ -1085,6 +1093,273 @@ if (document.getElementById("wake-start")) {
   document.getElementById("wake-stop").addEventListener("click", () => wakeAction("stop"));
 }
 
+/* ------------------------------------------------------------- memory */
+let memData = null;
+
+function memParams() {
+  const p = new URLSearchParams();
+  const q = memQueryEl.value.trim();
+  if (q) p.set("query", q);
+  const tag = memTagEl.value.trim();
+  if (tag) p.set("tag", tag);
+  if (memSourceEl.value) p.set("source", memSourceEl.value);
+  p.set("limit", "100");
+  return p;
+}
+
+function memItemCard(item) {
+  const card = document.createElement("div");
+  card.className = "mem-card";
+  const head = document.createElement("div");
+  head.className = "mem-head";
+  const text = document.createElement("div");
+  text.className = "mem-text";
+  text.textContent = item.text;
+  const del = document.createElement("button");
+  del.className = "mem-del";
+  del.textContent = "FORGET";
+  del.addEventListener("click", () => deleteMemoryItem(item.item_id));
+  head.append(text, del);
+
+  const meta = document.createElement("div");
+  meta.className = "mem-meta";
+  const bits = [];
+  if (item.kind) bits.push(item.kind);
+  if (item.source) bits.push(`source: ${item.source}`);
+  (item.tags || []).forEach((t) => bits.push(`#${t}`));
+  if (item.created_at) bits.push(item.created_at);
+  meta.textContent = bits.join("  ·  ");
+
+  card.append(head, meta);
+  return card;
+}
+
+function fillMemSources(sources) {
+  if (!memSourceEl) return;
+  const current = memSourceEl.value;
+  memSourceEl.innerHTML = '<option value="">any source</option>';
+  (sources || []).forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.source;
+    opt.textContent = `${s.source} (${s.count})`;
+    memSourceEl.appendChild(opt);
+  });
+  memSourceEl.value = current;
+}
+
+function renderMemory(data) {
+  memData = data;
+  const items = data.items || [];
+  const stats = data.stats || {};
+  if (memSummaryEl) {
+    memSummaryEl.textContent = `Long-term memory: ${stats.total || 0} items, ` +
+      `${(stats.sources || []).length} sources, ${(stats.tags || []).length} tags.`;
+  }
+  if (memAutoEl) memAutoEl.checked = !!stats.auto_ingest;
+
+  if (memFacetsEl) {
+    memFacetsEl.innerHTML = "";
+    (stats.sources || []).forEach((s) => {
+      const chip = document.createElement("span");
+      chip.className = "mem-chip";
+      chip.textContent = `${s.source}: ${s.count} ×`;
+      chip.title = "Click to delete everything from this source";
+      chip.addEventListener("click", () => deleteMemorySource(s.source));
+      memFacetsEl.appendChild(chip);
+    });
+    (stats.tags || []).slice(0, 12).forEach((t) => {
+      const chip = document.createElement("span");
+      chip.className = "mem-chip tag";
+      chip.textContent = `#${t.tag} (${t.count})`;
+      chip.addEventListener("click", () => {
+        memTagEl.value = t.tag;
+        loadMemory();
+      });
+      memFacetsEl.appendChild(chip);
+    });
+  }
+
+  if (!memListEl) return;
+  memListEl.innerHTML = "";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = "No memory items yet.";
+    memListEl.appendChild(empty);
+    return;
+  }
+  items.forEach((it) => memListEl.appendChild(memItemCard(it)));
+  fillMemSources(stats.sources);
+}
+
+async function loadMemory() {
+  try {
+    const data = await (await fetch("/api/memory?" + memParams())).json();
+    renderMemory(data);
+  } catch {
+    if (memStatusEl) memStatusEl.textContent = "Could not load memory.";
+  }
+}
+
+async function memPost(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function addMemory(extract) {
+  const text = document.getElementById("mem-text").value.trim();
+  if (!text) {
+    memStatusEl.textContent = "Type something to remember first.";
+    return;
+  }
+  const source = document.getElementById("mem-new-source").value.trim();
+  const tags = document.getElementById("mem-new-tags").value.trim();
+  memStatusEl.textContent = extract ? "Extracting facts..." : "Saving...";
+  try {
+    let data;
+    if (extract) {
+      data = await memPost("/api/memory/ingest", { text, source, tags, mode: "heuristic" });
+    } else {
+      data = await memPost("/api/memory", { text, source, tags, kind: "fact" });
+    }
+    memStatusEl.textContent = `Saved ${data.added || 1} item(s), ${data.skipped || 0} duplicate(s).`;
+    document.getElementById("mem-text").value = "";
+    await loadMemory();
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function importMemoryFile() {
+  const path = document.getElementById("mem-path").value.trim();
+  if (!path) {
+    memStatusEl.textContent = "Enter a file path to import.";
+    return;
+  }
+  memStatusEl.textContent = "Importing...";
+  try {
+    const data = await memPost("/api/memory/import", { path });
+    memStatusEl.textContent = `Imported ${data.added} item(s), ${data.skipped} duplicate(s).`;
+    await loadMemory();
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function importMemoryJson() {
+  const raw = document.getElementById("mem-json").value.trim();
+  if (!raw) {
+    memStatusEl.textContent = "Paste JSON to import.";
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    memStatusEl.textContent = `Invalid JSON: ${err.message}`;
+    return;
+  }
+  const items = Array.isArray(parsed) ? parsed : parsed.items;
+  if (!Array.isArray(items)) {
+    memStatusEl.textContent = "JSON must be a list or an object with an items list.";
+    return;
+  }
+  memStatusEl.textContent = "Importing...";
+  try {
+    const data = await memPost("/api/memory/import", { items });
+    memStatusEl.textContent = `Imported ${data.added} item(s), ${data.skipped} duplicate(s).`;
+    document.getElementById("mem-json").value = "";
+    await loadMemory();
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function importLegacyMemory() {
+  memStatusEl.textContent = "Importing old memory...";
+  try {
+    const data = await memPost("/api/memory/import", { legacy: true });
+    memStatusEl.textContent = `Imported ${data.added} item(s), ${data.skipped} duplicate(s).`;
+    await loadMemory();
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function exportMemory() {
+  try {
+    const data = await (await fetch("/api/memory/export")).json();
+    const blob = new Blob([JSON.stringify(data.items || [], null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "jarvis-memory.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    memStatusEl.textContent = `Exported ${data.count || 0} item(s).`;
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function deleteMemoryItem(itemId) {
+  try {
+    const res = await fetch(`/api/memory/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+    memStatusEl.textContent = "Forgotten.";
+    await loadMemory();
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function deleteMemorySource(source) {
+  if (!confirm(`Delete all memory from "${source}"?`)) return;
+  try {
+    const data = await memPost("/api/memory/delete-source", { source });
+    memStatusEl.textContent = `Removed ${data.removed} item(s) from ${source}.`;
+    await loadMemory();
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+async function toggleAutoIngest() {
+  try {
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ "memory.auto_ingest": memAutoEl.checked ? "1" : "0" }),
+    });
+    memStatusEl.textContent = memAutoEl.checked
+      ? "Auto-capture on: new facts from chat will be saved."
+      : "Auto-capture off.";
+  } catch (err) {
+    memStatusEl.textContent = `Failed: ${err.message}`;
+  }
+}
+
+if (memListEl) {
+  document.getElementById("mem-search").addEventListener("click", loadMemory);
+  memQueryEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadMemory();
+  });
+  document.getElementById("mem-add").addEventListener("click", () => addMemory(false));
+  document.getElementById("mem-ingest").addEventListener("click", () => addMemory(true));
+  document.getElementById("mem-import-file").addEventListener("click", importMemoryFile);
+  document.getElementById("mem-import-json").addEventListener("click", importMemoryJson);
+  document.getElementById("mem-import-legacy").addEventListener("click", importLegacyMemory);
+  document.getElementById("mem-export").addEventListener("click", exportMemory);
+  if (memAutoEl) memAutoEl.addEventListener("change", toggleAutoIngest);
+}
+
 async function loadSettings() {
   try {
     const s = await (await fetch("/api/settings")).json();
@@ -1126,3 +1401,4 @@ loadServiceKeys();
 loadEngines();
 loadOnDevice();
 loadVoice();
+loadMemory();

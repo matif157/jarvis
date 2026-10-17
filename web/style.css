@@ -254,3 +254,44 @@ label.inline { flex-direction: row; align-items: center; gap: 8px; text-transfor
 .od-bar { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; }
 .od-fill { height: 100%; background: var(--acc); width: 0; transition: width .4s; }
 .od-err { color: var(--warn); overflow-wrap: anywhere; }
+
+/* memory browser */
+.mem-search { display: flex; gap: 8px; margin-bottom: 12px; }
+.mem-search input, .mem-search select { flex: 1; min-width: 0; }
+.mem-search input#mem-tag { flex: 0 0 110px; }
+.mem-search button { flex: 0 0 auto; }
+.mem-facets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.mem-chip {
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.mem-chip:hover { border-color: var(--warn); color: var(--warn); }
+.mem-chip.tag:hover { border-color: var(--acc); color: var(--acc); }
+.mem-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.mem-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.mem-head { display: flex; gap: 10px; align-items: flex-start; }
+.mem-text { flex: 1; word-break: break-word; }
+.mem-del {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: .06em;
+  padding: 3px 8px;
+  color: var(--dim);
+}
+.mem-del:hover { border-color: var(--warn); color: var(--warn); }
+.mem-meta { font-size: 11px; color: var(--dim); margin-top: 5px; }
+.mem-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.mem-row input { flex: 1; min-width: 0; }
+textarea {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--txt);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  resize: vertical;
+}

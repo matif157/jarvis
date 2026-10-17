@@ -16,6 +16,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="chat">Chat</button>
       <button class="tab" data-tab="agent">Agent</button>
+      <button class="tab" data-tab="memory">Memory</button>
       <button class="tab" data-tab="tools">Tools</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -51,6 +52,54 @@
       <div class="chat-controls">
         <input id="console-input" placeholder="Run a task and watch it work..." autocomplete="off">
         <button id="console-send">RUN</button>
+      </div>
+    </section>
+
+    <!-- MEMORY -->
+    <section id="tab-memory" class="panel">
+      <h2>Long-term memory</h2>
+      <p class="hint" id="mem-summary">Facts and notes Jarvis remembers, with source and tags. Add one, paste a block of text to extract from, or import a file.</p>
+
+      <div class="mem-search">
+        <input id="mem-query" placeholder="Search memory..." autocomplete="off">
+        <input id="mem-tag" placeholder="tag filter" autocomplete="off">
+        <select id="mem-source"><option value="">any source</option></select>
+        <button id="mem-search">SEARCH</button>
+      </div>
+
+      <div id="mem-facets" class="mem-facets"></div>
+      <div id="mem-list" class="mem-list"></div>
+      <div id="mem-status" class="status"></div>
+
+      <h2 style="margin-top:32px">Add memory</h2>
+      <label>Text
+        <textarea id="mem-text" rows="3" placeholder="e.g. My name is Husayn. I prefer Urdu replies."></textarea>
+      </label>
+      <div class="mem-row">
+        <input id="mem-new-source" placeholder="source (e.g. manual)">
+        <input id="mem-new-tags" placeholder="tags, comma separated">
+      </div>
+      <div class="actions">
+        <button id="mem-add">ADD AS-IS</button>
+        <button id="mem-ingest">EXTRACT FACTS</button>
+      </div>
+      <label class="inline">
+        <input type="checkbox" id="mem-auto"> Auto-capture facts from chat
+      </label>
+
+      <h2 style="margin-top:32px">Import &amp; export</h2>
+      <p class="hint">Import from a file on this device (JSON, CSV, Markdown or text) or paste a JSON export back in. Export writes a small JSON file you can keep.</p>
+      <div class="mem-row">
+        <input id="mem-path" placeholder="/path/to/notes.md">
+        <button id="mem-import-file">IMPORT FILE</button>
+      </div>
+      <label>Paste JSON
+        <textarea id="mem-json" rows="3" placeholder='{"items": [{"text": "..."}]}'></textarea>
+      </label>
+      <div class="actions">
+        <button id="mem-import-json">IMPORT JSON</button>
+        <button id="mem-import-legacy">IMPORT OLD MEMORY</button>
+        <button id="mem-export">EXPORT</button>
       </div>
     </section>
 

@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import db, engines, llm, ondevice, service_keys, voice
+from . import memory_ingest
 from . import __version__
 from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
@@ -82,6 +83,34 @@ class VoiceIn(BaseModel):
 
 class WakeIn(BaseModel):
     keyword: str = "jarvis"
+
+
+class MemoryIn(BaseModel):
+    text: str
+    key: Optional[str] = ""
+    kind: Optional[str] = "fact"
+    source: Optional[str] = ""
+    tags: Optional[str] = ""
+    session: Optional[str] = ""
+
+
+class MemoryIngestIn(BaseModel):
+    text: str
+    source: Optional[str] = ""
+    tags: Optional[str] = ""
+    mode: Optional[str] = "heuristic"
+    session: Optional[str] = ""
+
+
+class MemoryImportIn(BaseModel):
+    path: Optional[str] = None
+    items: Optional[list] = None
+    source: Optional[str] = None
+    legacy: Optional[bool] = False
+
+
+class MemorySourceIn(BaseModel):
+    source: str
 
 
 @app.on_event("startup")
@@ -543,6 +572,111 @@ def post_wake_stop() -> JSONResponse:
         return JSONResponse({"ok": True})
     except voice.VoiceError as exc:
         return _voice_error(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Memory ingestion & import (Phase 21)
+# ---------------------------------------------------------------------------
+@app.get("/api/memory")
+def list_memory(
+    query: Optional[str] = "",
+    tag: Optional[str] = None,
+    source: Optional[str] = None,
+    limit: int = 50,
+) -> dict:
+    """Ranked memory items plus source/tag facets for the Memory tab."""
+    items = memory_ingest.search(
+        query=query or "", tags=tag or None, source=source or None, limit=limit
+    )
+    return {"count": len(items), "items": items, "stats": memory_ingest.stats()}
+
+
+@app.get("/api/memory/stats")
+def memory_stats() -> dict:
+    return {"ok": True, **memory_ingest.stats()}
+
+
+@app.post("/api/memory")
+def add_memory(payload: MemoryIn) -> JSONResponse:
+    """Store one explicit memory item (deduped by content)."""
+    if not (payload.text or "").strip():
+        return JSONResponse({"ok": False, "error": "text is required"}, status_code=400)
+    item = memory_ingest.new_item(
+        payload.text,
+        key=payload.key or "",
+        kind=payload.kind or "fact",
+        source=payload.source or "",
+        tags=payload.tags or "",
+        session=payload.session or "",
+    )
+    counts = memory_ingest.store_items([item])
+    return JSONResponse({"ok": True, "item": item, **counts})
+
+
+@app.delete("/api/memory/{item_id}")
+def delete_memory(item_id: str) -> JSONResponse:
+    if not memory_ingest.delete_item(item_id):
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+    return JSONResponse({"ok": True, "item_id": item_id})
+
+
+@app.post("/api/memory/ingest")
+async def ingest_memory(payload: MemoryIngestIn) -> JSONResponse:
+    """Extract and store facts from a block of text (heuristic or llm)."""
+    if not (payload.text or "").strip():
+        return JSONResponse({"ok": False, "error": "text is required"}, status_code=400)
+    mode = (payload.mode or "heuristic").lower()
+    if mode not in ("heuristic", "llm"):
+        return JSONResponse(
+            {"ok": False, "error": f"unknown mode: {mode}"}, status_code=400
+        )
+    result = await memory_ingest.aingest_text(
+        payload.text,
+        source=payload.source or "",
+        tags=payload.tags or "",
+        mode=mode,
+        session=payload.session or "",
+    )
+    return JSONResponse({"ok": True, **result})
+
+
+@app.post("/api/memory/import")
+def import_memory(payload: MemoryImportIn) -> JSONResponse:
+    """Import from a file path, an inline item list, or the legacy store."""
+    try:
+        if payload.path:
+            result = memory_ingest.import_file(payload.path, source=payload.source)
+        elif payload.legacy:
+            result = memory_ingest.import_legacy_memory()
+        elif payload.items is not None:
+            result = memory_ingest.import_items(
+                payload.items, source_override=payload.source
+            )
+        else:
+            return JSONResponse(
+                {"ok": False, "error": "provide path, items or legacy=true"},
+                status_code=400,
+            )
+    except memory_ingest.MemoryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, **result})
+
+
+@app.get("/api/memory/export")
+def export_memory() -> JSONResponse:
+    items = memory_ingest.export_items()
+    return JSONResponse(
+        {"ok": True, "count": len(items), "items": items},
+        headers={"Content-Disposition": 'attachment; filename="jarvis-memory.json"'},
+    )
+
+
+@app.post("/api/memory/delete-source")
+def delete_memory_source(payload: MemorySourceIn) -> JSONResponse:
+    if not (payload.source or "").strip():
+        return JSONResponse({"ok": False, "error": "source is required"}, status_code=400)
+    removed = memory_ingest.delete_source(payload.source)
+    return JSONResponse({"ok": True, "source": payload.source, "removed": removed})
 
 
 @app.get("/api/providers")
