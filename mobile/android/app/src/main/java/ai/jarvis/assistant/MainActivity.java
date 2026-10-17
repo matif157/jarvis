@@ -2,8 +2,6 @@ package ai.jarvis.assistant;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -11,31 +9,43 @@ import android.webkit.WebViewClient;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 public class MainActivity extends Activity {
     private static final String HOME_URL = "http://127.0.0.1:8771/";
-    private static final int RETRY_DELAY_MS = 500;
-    private static final int MAX_ATTEMPTS = 60;
+    private static final String HEALTH_URL = "http://127.0.0.1:8771/api/health";
+    private static final int MAX_WAIT_MS = 180_000;
+    private static final int POLL_INTERVAL_MS = 500;
 
     private WebView webView;
-    private Handler handler;
-    private int attempts = 0;
-    private boolean loaded = false;
-    private boolean loadScheduled = false;
+
+    private static final String LOADING_HTML =
+            "<!DOCTYPE html><html><head><meta name=\"viewport\" "
+            + "content=\"width=device-width, initial-scale=1\">"
+            + "<style>body{font-family:sans-serif;display:flex;align-items:center;"
+            + "justify-content:center;height:100vh;margin:0;background:#0f1115;color:#e8e8e8}"
+            + "div{text-align:center}h1{font-weight:600;letter-spacing:2px}"
+            + "p{color:#9aa0a6;font-size:14px}</style></head>"
+            + "<body><div><h1>JARVIS</h1><p id=\"s\">Starting local assistant\u2026</p></div>"
+            + "<script>var d=0;setInterval(function(){d++;document.getElementById('s')"
+            + ".textContent='Starting local assistant\u2026 '+(d/2).toFixed(0)+'s';},500);"
+            + "</script></body></html>";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        handler = new Handler(Looper.getMainLooper());
-
         if (!Python.isStarted()) {
             Python.start(new AndroidPlatform(this));
         }
 
-        startServer();
         setupWebView();
-        scheduleLoad();
+        webView.loadDataWithBaseURL(HOME_URL, LOADING_HTML, "text/html", "utf-8", null);
+
+        startServer();
+        waitForServerThenLoad();
     }
 
     private void setupWebView() {
@@ -54,20 +64,6 @@ public class MainActivity extends Activity {
                 view.loadUrl(url);
                 return true;
             }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                // First successful load means the embedded server is up; stop retrying.
-                loaded = true;
-            }
-
-            @Override
-            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                // Server not ready yet — keep retrying until MAX_ATTEMPTS.
-                if (!loaded) {
-                    scheduleLoad();
-                }
-            }
         });
     }
 
@@ -82,20 +78,43 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void scheduleLoad() {
-        if (loaded || loadScheduled || attempts >= MAX_ATTEMPTS) {
-            return;
-        }
-        loadScheduled = true;
-        handler.postDelayed(() -> {
-            loadScheduled = false;
-            if (loaded || webView == null) {
-                return;
+    private void waitForServerThenLoad() {
+        new Thread(() -> {
+            long deadline = System.currentTimeMillis() + MAX_WAIT_MS;
+            while (System.currentTimeMillis() < deadline) {
+                if (probeHealth()) {
+                    runOnUiThread(() -> {
+                        if (webView != null) {
+                            webView.loadUrl(HOME_URL);
+                        }
+                    });
+                    return;
+                }
+                try {
+                    Thread.sleep(POLL_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    return;
+                }
             }
-            attempts++;
-            webView.loadUrl(HOME_URL);
-            scheduleLoad();
-        }, RETRY_DELAY_MS);
+        }).start();
+    }
+
+    private boolean probeHealth() {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(HEALTH_URL).openConnection();
+            conn.setConnectTimeout(1500);
+            conn.setReadTimeout(1500);
+            conn.setRequestMethod("GET");
+            int code = conn.getResponseCode();
+            return code == 200;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
     }
 
     @Override
