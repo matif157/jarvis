@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
-## 2026-10-17 (Phase 18 - Guided key setup & engine manager)
+## 2026-10-17 (Phase 18 - Guided key setup & engine manager / v1.1.0)
 - **New `jarvis/service_keys.py`**: local storage for non-LLM service tokens (`hf`, `picovoice`) under `secret.<name>` in the settings table — masked (`…abcd`) in every payload, raw value never returned by any endpoint.
 - **New `jarvis/engines.py`**: validated engine selection per component (`llm`: auto/cloud/on_device, `stt`: on_device/cloud/auto, `image`: local/cloud/off), persisted under `engine.<name>`; invalid values are rejected before reaching the DB. Consumers land with their phases (on-device LLM, mobile voice, local image service).
 - **New endpoints**: `GET /api/keys` + `POST /api/keys/{name}` (save/clear service keys, 404 on unknown) and `GET /api/engines` + `POST /api/engines` (partial updates; invalid choice → 400).
