@@ -132,7 +132,6 @@ class TimeTool(Tool):
     permissions = []
 
     def run(self, **kwargs) -> ToolResult:
-        from datetime import datetime
 
         return ToolResult(success=True, result=datetime.now().isoformat(), tool=self.name)
 
@@ -195,7 +194,6 @@ class TaskReopenTool(Tool):
     permissions = ["task.write"]
 
     def run(self, task_id: str) -> ToolResult:
-        from datetime import datetime
 
         from . import tasks
 
@@ -215,7 +213,6 @@ class TaskCancelTool(Tool):
     permissions = ["task.write"]
 
     def run(self, task_id: str) -> ToolResult:
-        from datetime import datetime
 
         from . import db
 
@@ -232,8 +229,9 @@ class NoteAddTool(Tool):
     permissions = ["note.write"]
 
     def run(self, content: str, tags: List[str] = None) -> ToolResult:
-        from . import db
         import uuid
+
+        from . import db
 
         note_id = str(uuid.uuid4())
         db.add_note_db(note_id=note_id, content=content, tags=tags or [])
@@ -549,6 +547,15 @@ def get_enhanced_registry() -> ToolRegistry:
         from . import voice
 
         for tool in voice.get_voice_tools():
+            reg.register(tool)
+    except Exception:
+        pass
+
+    # Device control (Phase 24) - consent-gated, audited screen actions
+    try:
+        from . import device_control
+
+        for tool in device_control.get_device_tools():
             reg.register(tool)
     except Exception:
         pass

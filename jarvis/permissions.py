@@ -5,12 +5,11 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from .config import get_config_dir
-
 
 DEFAULT_ALLOWLIST = {
     "file.read": ["Documents/*", "Downloads/*", "Desktop/*", "~/*"],
@@ -43,6 +42,8 @@ DEFAULT_ALLOWLIST = {
     "voice.read": ["*"],
     "voice.speak": ["*"],
     "voice.listen": [],
+    "device.read": ["*"],
+    "device.control": ["*"],
     "workflow.read": ["*"],
     "workflow.write": ["*"],
     "workflow.run": [],
@@ -142,7 +143,7 @@ class PermissionManager:
         if action in self.ask_first:
             return True
         # Destructive defaults
-        if action in ("file.delete", "system.configure", "email.send", "job.apply", "voice.listen", "workflow.run", "iot.control"):
+        if action in ("file.delete", "system.configure", "email.send", "job.apply", "voice.listen", "workflow.run", "iot.control", "device.control"):
             return True
         return False
 

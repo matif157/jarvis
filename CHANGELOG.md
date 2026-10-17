@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-18 (Consent-gated device control / v1.6.0)
+- **Phase 24** - Jarvis can now read the screen and tap, scroll, type or press back/home on Android, through a new AccessibilityService. All four consent layers are required, none are skipped:
+  1. **In-app master toggle** (`device.enabled`, default off) - Settings > Device control.
+  2. **System accessibility grant** - the app only ever opens that screen (`openAccessibilitySettings()`), the user flips the switch themselves; revoking it clears the service's instance (`onUnbind`).
+  3. **Per-action confirmation** for agent-driven control: `device.control` is confirmation-gated in the permission model (like `iot.control`), so interactive chat flows ask before acting.
+  4. **Audit log** - every action that reaches the bridge is written to the new `device_audit` table (action, params, ok, error; newest 2000 kept) and shown in the UI. Requests rejected by validation or the consent gate raise before the bridge, so they never run and never touch the log.
+- **Actions** (whitelisted, validated in Python before the Java switch): `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock` (Android 9+), `screen` (bounded text read of the active window, line-deduplicated), `nodes` (actionable click/edit/scroll nodes with labels + bounds, BFS order), `tap` (x/y pixels via GestureDescription), `click_node` (ACTION_CLICK on a listed index), `scroll` (up/down/left/right swipe from screen center), `type` (ACTION_SET_TEXT into the focused field, honest "tap one first" error otherwise).
+- **New API**: `GET /api/device/status` (never gated - needed to grant consent), `POST /api/device/settings`, `GET /api/device/audit`, `POST /api/device/action`. All bridge failures surface the Android-side reason with HTTP 409; consent rejections are 403; validation is 400.
+- **New tools**: `device.status`, `device.screen`, `device.tap`, `device.node`, `device.scroll`, `device.type`, `device.global` - registered in the enhanced registry, all going through the same gate, confirmation and audit as the HTTP endpoints.
+- **New Java**: `device/DeviceControlService` (AccessibilityService: global actions, tree reads, gesture taps/scrolls, focused-field typing) and `device/DeviceBridge` (JSON-in/JSON-out `status()`/`action()`); `res/xml/accessibility_service_config.xml` (`canRetrieveWindowContent` + `canPerformGestures`); manifest service with `BIND_ACCESSIBILITY_SERVICE`; `MainActivity.openAccessibilitySettings()`.
+- **Settings UI**: new "Device control" section (status incl. foreground app, GRANT ACCESS button, master toggle, live audit log).
+- Off-device degrades honestly: `supported: false` with a pointer to the Android app; service-not-granted says exactly which Android screen to open.
+- Added `tests/test_phase24_device_control.py` (9 offline checks: honest status, both consent halves gating before the bridge, validation never reaching it, dispatch + audit contents/order, bridge failures audited, service-off messages, full HTTP flow, Java/manifest/config source markers, tools incl. the registry confirmation layer). Permission model gains `device.read`/`device.control` scopes (`device.control` confirmation-gated by default).
+- Full regression suite passes (**417 tests across 40 modules**).
+- **APK v1.6.0 (versionCode 10)**, arm64-v8a.
+
+
 ## 2026-10-18 (Urdu TTS quality: script auto-detect + cloud fallback / v1.5.1)
 - **Problem**: stock Android/desktop voices read Urdu (Arabic-script) text with an English accent — unusable for real Urdu speech.
 - **Auto-detect** (`jarvis/voice.py`): new `detect_language()` returns `ur-PK` when >30% of a text's letters are in the Urdu/Arabic block; `speak_text()` applies it whenever no explicit language was passed, so Urdu replies, SAY taps and the `voice.speak` tool are routed correctly with zero UI change. Roman Urdu (latin script) stays on the default voice.

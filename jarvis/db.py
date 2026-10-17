@@ -114,6 +114,18 @@ CREATE TABLE IF NOT EXISTS wa_messages (
 
 CREATE INDEX IF NOT EXISTS idx_wa_messages_chat ON wa_messages(chat);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_messages_hash ON wa_messages(hash);
+
+-- Device control audit (Phase 24): every action that reached the bridge
+CREATE TABLE IF NOT EXISTS device_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    action TEXT NOT NULL,
+    params TEXT DEFAULT '',
+    ok INTEGER NOT NULL,
+    error TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_audit_ts ON device_audit(ts);
 """
 
 
@@ -496,6 +508,53 @@ def delete_wa_messages_db(chat: str) -> int:
     count = cur.rowcount
     conn.close()
     return count
+
+
+# Device control audit (Phase 24)
+DEVICE_AUDIT_MAX = 2000
+
+
+def add_device_audit_db(action: str, params: str, ok: bool, error: str = "") -> None:
+    """Append one executed device action; prunes to the newest DEVICE_AUDIT_MAX."""
+    conn = connect()
+    conn.execute(
+        "INSERT INTO device_audit(ts, action, params, ok, error) VALUES (?,?,?,?,?)",
+        (now(), action, params, 1 if ok else 0, error),
+    )
+    conn.execute(
+        "DELETE FROM device_audit WHERE id NOT IN "
+        "(SELECT id FROM device_audit ORDER BY id DESC LIMIT ?)",
+        (DEVICE_AUDIT_MAX,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_device_audit_db(limit: int = 100) -> List[Dict[str, Any]]:
+    """Newest-first audit rows (ts, action, params, ok, error)."""
+    conn = connect()
+    rows = conn.execute(
+        "SELECT ts, action, params, ok, error FROM device_audit ORDER BY id DESC LIMIT ?",
+        (max(1, min(int(limit), DEVICE_AUDIT_MAX)),),
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "ts": r["ts"],
+            "action": r["action"],
+            "params": r["params"],
+            "ok": bool(r["ok"]),
+            "error": r["error"],
+        }
+        for r in rows
+    ]
+
+
+def count_device_audit_db() -> int:
+    conn = connect()
+    row = conn.execute("SELECT COUNT(*) AS n FROM device_audit").fetchone()
+    conn.close()
+    return int(row["n"]) if row else 0
 
 
 # Messages

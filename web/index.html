@@ -194,6 +194,21 @@
       <div id="wa-status" class="status"></div>
       <div id="wa-chats" class="mem-list"></div>
 
+      <h2 style="margin-top:32px" id="device">Device control</h2>
+      <p class="hint">Let Jarvis read the screen and tap, scroll, type or press back/home through Android's accessibility service. Both halves of consent are yours: grant access in Android Settings, then turn on the master toggle here. Every action that runs is written to the audit log below - nothing runs until both switches are on.</p>
+      <div id="dev-info" class="hint"></div>
+      <div class="actions">
+        <button id="dev-open-a11y">GRANT ACCESS</button>
+        <button id="dev-refresh">REFRESH</button>
+      </div>
+      <div class="wa-settings">
+        <label class="inline">
+          <input type="checkbox" id="dev-enabled"> Enable device control (master switch)
+        </label>
+      </div>
+      <div id="dev-status" class="status"></div>
+      <div id="dev-audit" class="mem-list"></div>
+
       <h2 style="margin-top:32px">Preferences</h2>
       <label>Atif Assistant URL
         <input id="set-atif-url" placeholder="http://127.0.0.1:8770">

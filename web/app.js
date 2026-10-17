@@ -1601,6 +1601,101 @@ if (waSection) {
   if (waCooldownEl) waCooldownEl.addEventListener("change", saveWaSettings);
 }
 
+/* ------------------------------------------------------ device control */
+const devInfoEl = document.getElementById("dev-info");
+const devStatusEl = document.getElementById("dev-status");
+const devEnabledEl = document.getElementById("dev-enabled");
+const devAuditEl = document.getElementById("dev-audit");
+
+function renderDevice(data) {
+  if (!devInfoEl) return;
+  const lines = [];
+  if (!data.supported) {
+    lines.push("Device control needs the Android app - grant accessibility there (Settings > Device control).");
+  } else if (data.error) {
+    lines.push(data.error);
+  } else if (data.running) {
+    lines.push("Accessibility service: active");
+  } else {
+    lines.push(data.note || "Accessibility service: not granted - tap GRANT ACCESS");
+  }
+  if (data.supported && data.foreground) lines.push(`Foreground app: ${data.foreground}`);
+  lines.push(`Audit: ${data.audit || 0} recorded action(s)`);
+  devInfoEl.innerHTML = lines.join("<br>");
+  if (devEnabledEl) devEnabledEl.checked = !!data.enabled;
+}
+
+async function loadDeviceControl() {
+  try {
+    const data = await (await fetch("/api/device/status")).json();
+    renderDevice(data);
+    await loadDeviceAudit();
+  } catch {
+    if (devInfoEl) devInfoEl.textContent = "Could not load device-control status.";
+  }
+}
+
+async function loadDeviceAudit() {
+  if (!devAuditEl) return;
+  try {
+    const data = await (await fetch("/api/device/audit?limit=30")).json();
+    devAuditEl.innerHTML = "";
+    if (!data.entries || !data.entries.length) {
+      devAuditEl.textContent = "No actions recorded yet.";
+      return;
+    }
+    for (const entry of data.entries) {
+      const row = document.createElement("div");
+      row.className = "mem-meta";
+      row.textContent =
+        `${entry.ts}  ${entry.ok ? "ok" : "FAILED"}  ${entry.action}` +
+        (entry.params ? ` ${entry.params}` : "") +
+        (entry.error ? `  ${entry.error}` : "");
+      devAuditEl.appendChild(row);
+    }
+  } catch {
+    devAuditEl.textContent = "Could not load the audit log.";
+  }
+}
+
+async function saveDeviceEnabled() {
+  if (!devEnabledEl) return;
+  const enabled = devEnabledEl.checked;
+  try {
+    const res = await fetch("/api/device/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "save failed");
+    if (devStatusEl) {
+      devStatusEl.textContent = enabled
+        ? "Enabled - actions run now that accessibility is granted."
+        : "Disabled - no actions will run.";
+    }
+    renderDevice(data);
+  } catch (err) {
+    if (devStatusEl) devStatusEl.textContent = `Failed: ${err.message}`;
+    devEnabledEl.checked = !enabled;
+  }
+}
+
+const devSection = document.getElementById("dev-audit");
+if (devSection) {
+  document.getElementById("dev-refresh").addEventListener("click", loadDeviceControl);
+  document.getElementById("dev-open-a11y").addEventListener("click", () => {
+    const bridge = window.JarvisAndroid;
+    if (bridge && bridge.openAccessibilitySettings) {
+      bridge.openAccessibilitySettings();
+    } else if (devInfoEl) {
+      devInfoEl.textContent =
+        "Accessibility access is an Android setting: Settings > Accessibility > Jarvis device control.";
+    }
+  });
+  if (devEnabledEl) devEnabledEl.addEventListener("change", saveDeviceEnabled);
+}
+
 async function loadSettings() {
   try {
     const s = await (await fetch("/api/settings")).json();
@@ -1644,3 +1739,4 @@ loadOnDevice();
 loadVoice();
 loadMemory();
 loadWhatsApp();
+loadDeviceControl();

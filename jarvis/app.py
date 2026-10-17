@@ -16,7 +16,18 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, db, engines, llm, memory_ingest, ondevice, service_keys, voice, whatsapp
+from . import (
+    __version__,
+    db,
+    device_control,
+    engines,
+    llm,
+    memory_ingest,
+    ondevice,
+    service_keys,
+    voice,
+    whatsapp,
+)
 from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
 
@@ -140,6 +151,21 @@ class WhatsAppSettingsIn(BaseModel):
 class WhatsAppImportIn(BaseModel):
     path: str
     chat: Optional[str] = None
+
+
+class DeviceSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+
+
+class DeviceActionIn(BaseModel):
+    action: str
+    x: Optional[int] = None
+    y: Optional[int] = None
+    index: Optional[int] = None
+    direction: Optional[str] = None
+    text: Optional[str] = None
+    max_chars: Optional[int] = None
+    max_nodes: Optional[int] = None
 
 
 @app.on_event("startup")
@@ -839,6 +865,51 @@ async def whatsapp_delete_chat(chat: str) -> JSONResponse:
     except whatsapp.WhatsAppError as exc:
         return _whatsapp_error(exc, exc.status)
     return JSONResponse({"ok": True, "chat": chat, "removed": removed})
+
+
+# ---------------------------------------------------------------------------
+# Device control (Phase 24): consent-gated Android screen actions
+# ---------------------------------------------------------------------------
+def _device_error(message: str, status: int = 400) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": str(message)}, status_code=status)
+
+
+@app.get("/api/device/status")
+def device_status() -> dict:
+    """Support, consent state, foreground app and audit count (never gated)."""
+    return device_control.status_payload()
+
+
+@app.post("/api/device/settings")
+def device_set_settings(payload: DeviceSettingsIn) -> JSONResponse:
+    """Turn the in-app master toggle on or off (Android access is granted separately)."""
+    try:
+        effective = device_control.apply_settings(enabled=payload.enabled)
+    except device_control.DeviceError as exc:
+        return _device_error(exc, exc.status)
+    return JSONResponse({"ok": True, **effective})
+
+
+@app.get("/api/device/audit")
+def device_audit(limit: int = 100) -> dict:
+    """Newest-first record of every action that reached the bridge."""
+    rows = device_control.audit_log(limit)
+    return {"ok": True, "count": len(rows), "total": device_control.audit_count(), "entries": rows}
+
+
+@app.post("/api/device/action")
+async def device_action(payload: DeviceActionIn) -> JSONResponse:
+    """Run one whitelisted action; consent + validation gate before the bridge."""
+    params: Dict[str, Any] = {}
+    for key in ("x", "y", "index", "direction", "text", "max_chars", "max_nodes"):
+        value = getattr(payload, key)
+        if value is not None:
+            params[key] = value
+    try:
+        data = await asyncio.to_thread(device_control.run_action, payload.action, params)
+    except device_control.DeviceError as exc:
+        return _device_error(exc, exc.status)
+    return JSONResponse({"ok": True, **data})
 
 
 @app.get("/api/providers")
