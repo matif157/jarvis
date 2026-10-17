@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-17 (Phase 17 - Transparent Agent Console / live timeline)
+- **New event bus** `jarvis/events.py`: dependency-free, sync-or-async `EventEmitter` that never lets instrumentation break the actual work (handler errors are swallowed). Event types: `start`, `thought`, `confirmation`, `tool_call`, `tool_result`, `message`, `error`, `done`.
+- **Action loop instrumentation** (`jarvis/action_loop.py`): emits `thought` → `confirmation` (when gated) → `tool_call` → `tool_result` (with `duration_ms` and `needs_confirmation`) for every tool step. Behaviour is unchanged when no handler is attached.
+- **Assistant streaming** (`jarvis/assistant.py`): `Assistant.respond(query, on_event=None)` now emits `start` and the final `message` (with provider/tool). Fully backward compatible.
+- **SSE endpoint** `GET /api/agent/stream` (`jarvis/app.py`): streams the timeline as Server-Sent Events for `EventSource` clients. No new dependency (uses `StreamingResponse`); runs the assistant in a background task and terminates with a `done` event. The legacy `POST /api/chat` is untouched.
+- **Web UI** (`web/`): new **Agent** console tab — a live, colour-coded timeline (routing, tool calls, args, results, timing) — fed by the same stream as the **Chat** tab, whose replies now carry a collapsible per-turn step trace. Falling back to `POST /api/chat` if the stream cannot open.
+- Added `tests/test_phase17_agent_stream.py` (10 offline checks: emitter semantics, action-loop events, assistant events, SSE frames, backward compat, UI assets).
+- Full regression suite passes (**343 tests across 33 modules**).
+
 ## 2026-10-17 (Phase 16 - Missing-tool wiring & routing correctness / v1.0.1)
 - **Fixed a double-execution bug**: `Router.route` no longer executes tools (it only decides chat vs. tool). `ActionLoop` is now the single executor, so every chosen tool runs exactly once.
 - **Wired missing tools** into `get_enhanced_registry()`:

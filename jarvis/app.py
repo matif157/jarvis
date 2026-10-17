@@ -6,11 +6,13 @@ and API keys. Local-only bind by default.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -130,6 +132,58 @@ async def chat(payload: ChatIn) -> dict:
         "session": assistant.session,
         "mode": assistant.mode,
     }
+
+
+def _sse(event: Dict[str, Any]) -> str:
+    """Format an event dict as a single Server-Sent Events frame."""
+    return f"data: {json.dumps(event, default=str)}\n\n"
+
+
+@app.get("/api/agent/stream")
+async def agent_stream(message: str, session: Optional[str] = None, mode: str = "auto") -> StreamingResponse:
+    """Stream the assistant's agent timeline as Server-Sent Events.
+
+    Emits ``start``, ``thought``, ``confirmation``, ``tool_call``,
+    ``tool_result``, ``message``, ``error`` and a terminating ``done`` event.
+    Uses ``EventSource``-compatible GET so it works in plain browsers and the
+    Android WebView without extra dependencies.
+    """
+    from .assistant import Assistant
+
+    queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
+
+    async def _handler(event: Dict[str, Any]) -> None:
+        await queue.put(event)
+
+    async def _produce() -> None:
+        assistant = Assistant(mode=mode or "auto")
+        if session:
+            assistant.session = session
+        try:
+            await assistant.respond(message, on_event=_handler)
+        except Exception as exc:  # noqa: BLE001 - report on the timeline
+            await queue.put({"type": "error", "error": str(exc)})
+        finally:
+            await queue.put({"type": "done"})
+
+    async def _stream():
+        task = asyncio.create_task(_produce())
+        try:
+            while True:
+                event = await queue.get()
+                yield _sse(event)
+                if event.get("type") == "done":
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(_stream(), media_type="text/event-stream", headers=headers)
 
 
 @app.post("/api/ask")

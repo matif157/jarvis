@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from . import atif_client, db, llm
+from . import atif_client, db, events, llm
 from .action_loop import ActionLoop
 from .router import Router
 from .tools import get_default_registry
@@ -95,56 +95,74 @@ class Assistant:
         text, _provider, _tool = await self.respond(query)
         return text
 
-    async def respond(self, query: str) -> tuple:
-        """Route a query and return (text, provider, tool)."""
-        if self.mode == "auto":
-            # Local-first: try LLM/router before Atif
-            ctx = self._get_context_memories(query)
-            loop_res = await self.action_loop.run(
-                query,
-                history=self.history[-8:],
-                context=ctx,
-            )
-            if loop_res.get("kind") == "chat" and loop_res.get("text"):
-                text = loop_res["text"]
-                self._record(query, text)
-                return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
-            res = await self.atif_respond(query)
-            if res[0]:
-                self._record(query, res[0])
-                return res[0], "atif", None
-            text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+    async def respond(self, query: str, on_event: Optional[events.EventHandler] = None) -> tuple:
+        """Route a query and return (text, provider, tool).
+
+        When ``on_event`` is supplied, a structured timeline of what the
+        assistant is doing (start, tool calls, results, final message) is
+        streamed to it. Behaviour is otherwise unchanged.
+        """
+        emitter = events.EventEmitter(on_event)
+
+        async def _finish(text: str, provider: str, tool: Optional[str]) -> tuple:
             self._record(query, text)
-            return text, "basic", None
-
-        if self.mode == "atif":
-            res = await self.atif_respond(query)
-            if res[0]:
-                self._record(query, res[0])
-                return res[0], "atif", None
-            text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
-            self._record(query, text)
-            return text, "basic", None
-
-        if self.mode in ("auto", "llm"):
-            ctx = self._get_context_memories(query)
-            loop_res = await self.action_loop.run(
-                query,
-                history=self.history[-8:],
-                context=ctx,
+            await emitter.emit(
+                events.EVT_MESSAGE, text=text, provider=provider, tool=tool
             )
-            if loop_res.get("kind") == "chat" and loop_res.get("text"):
-                text = loop_res["text"]
-                self._record(query, text)
-                return text, loop_res.get("provider") or "llm", (loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None)
-            if self.mode == "llm":
-                text = f"AI failed.\n\n{self.basic_respond(query)}"
-                self._record(query, text)
-                return text, "basic", None
+            return text, provider, tool
 
-        text = self.basic_respond(query)
-        self._record(query, text)
-        return text, "basic", None
+        await emitter.emit(
+            events.EVT_START, query=query, session=self.session, mode=self.mode
+        )
+
+        try:
+            if self.mode == "auto":
+                # Local-first: try LLM/router before Atif
+                ctx = self._get_context_memories(query)
+                loop_res = await self.action_loop.run(
+                    query,
+                    history=self.history[-8:],
+                    context=ctx,
+                    on_event=on_event,
+                )
+                if loop_res.get("kind") == "chat" and loop_res.get("text"):
+                    text = loop_res["text"]
+                    tool = loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None
+                    return await _finish(text, loop_res.get("provider") or "llm", tool)
+                res = await self.atif_respond(query)
+                if res[0]:
+                    return await _finish(res[0], "atif", None)
+                text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+                return await _finish(text, "basic", None)
+
+            if self.mode == "atif":
+                res = await self.atif_respond(query)
+                if res[0]:
+                    return await _finish(res[0], "atif", None)
+                text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
+                return await _finish(text, "basic", None)
+
+            if self.mode in ("auto", "llm"):
+                ctx = self._get_context_memories(query)
+                loop_res = await self.action_loop.run(
+                    query,
+                    history=self.history[-8:],
+                    context=ctx,
+                    on_event=on_event,
+                )
+                if loop_res.get("kind") == "chat" and loop_res.get("text"):
+                    text = loop_res["text"]
+                    tool = loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None
+                    return await _finish(text, loop_res.get("provider") or "llm", tool)
+                if self.mode == "llm":
+                    text = f"AI failed.\n\n{self.basic_respond(query)}"
+                    return await _finish(text, "basic", None)
+
+            text = self.basic_respond(query)
+            return await _finish(text, "basic", None)
+        except Exception as exc:  # noqa: BLE001 - surface failures to the timeline
+            await emitter.emit(events.EVT_ERROR, error=str(exc))
+            raise
 
     def _record(self, query: str, answer: str) -> None:
         self.history.append({"role": "user", "content": query})

@@ -3,6 +3,8 @@ const providersStatus = document.getElementById("providers-status");
 const settingsStatus = document.getElementById("settings-status");
 const statusLine = document.getElementById("status-line");
 const chatLog = document.getElementById("chat-log");
+const agentLog = document.getElementById("agent-log");
+const consoleState = document.getElementById("console-state");
 const toolsList = document.getElementById("tools-list");
 const toolParams = document.getElementById("tool-params");
 const toolConfirm = document.getElementById("tool-confirm");
@@ -11,6 +13,7 @@ const toolRun = document.getElementById("tool-run");
 const toolRunnerName = document.getElementById("tool-runner-name");
 
 let selectedTool = null;
+let stream = null; // active EventSource
 
 /* ---------------------------------------------------------------- tabs */
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -34,44 +37,223 @@ async function loadStatus() {
   }
 }
 
-/* ---------------------------------------------------------------- chat */
+/* --------------------------------------------------------------- agent */
+function setConsoleState(text, cls) {
+  consoleState.textContent = text;
+  consoleState.className = "console-state" + (cls ? " " + cls : "");
+}
+
+function consoleLine(kind, text, meta) {
+  const line = document.createElement("div");
+  line.className = `cline ${kind}`;
+  const tag = document.createElement("span");
+  tag.className = "ctag";
+  tag.textContent = kind;
+  const body = document.createElement("span");
+  body.className = "cbody";
+  body.textContent = text;
+  line.append(tag, body);
+  if (meta) {
+    const m = document.createElement("span");
+    m.className = "cmeta";
+    m.textContent = meta;
+    line.appendChild(m);
+  }
+  agentLog.appendChild(line);
+  agentLog.scrollTop = agentLog.scrollHeight;
+}
+
+function pretty(value) {
+  try {
+    if (typeof value === "string") return value;
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncate(text, n) {
+  text = text == null ? "" : String(text);
+  return text.length > n ? text.slice(0, n) + "…" : text;
+}
+
 function addChat(role, text) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
   div.textContent = text;
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
+  return div;
 }
 
-async function sendChat() {
+function attachTrace(bubble, steps) {
+  if (!steps.length) return;
+  const details = document.createElement("details");
+  details.className = "trace";
+  const summary = document.createElement("summary");
+  summary.textContent = `${steps.length} step${steps.length === 1 ? "" : "s"}`;
+  details.appendChild(summary);
+  const list = document.createElement("div");
+  list.className = "trace-steps";
+  for (const s of steps) {
+    const row = document.createElement("div");
+    row.className = "trace-step" + (s.success ? "" : " failed");
+    row.textContent = `${s.tool}(${truncate(pretty(s.args), 80)}) → ${
+      s.success ? truncate(pretty(s.result), 120) : s.error
+    }`;
+    list.appendChild(row);
+  }
+  details.appendChild(list);
+  bubble.appendChild(details);
+}
+
+function finishStream() {
+  if (stream) {
+    stream.close();
+    stream = null;
+  }
+  setConsoleState("done", "ok");
+}
+
+function runAgent(message) {
+  const mode = document.getElementById("chat-mode").value;
+  if (!message) return;
+  if (stream) stream.close();
+
+  addChat("user", message);
+  consoleLine("user", message);
+  setConsoleState("running", "busy");
+
+  const bubble = addChat("assistant", "…");
+  const steps = [];
+  let gotFinal = false;
+  let sawAny = false;
+
+  const url =
+    "/api/agent/stream?message=" +
+    encodeURIComponent(message) +
+    "&mode=" +
+    encodeURIComponent(mode);
+
+  stream = new EventSource(url);
+
+  stream.onmessage = (evt) => {
+    sawAny = true;
+    let ev;
+    try {
+      ev = JSON.parse(evt.data);
+    } catch {
+      return;
+    }
+    switch (ev.type) {
+      case "start":
+        consoleLine("start", `session ${ev.session || "?"} · mode ${ev.mode || "auto"}`);
+        break;
+      case "thought":
+        consoleLine("thought", ev.text || "");
+        break;
+      case "confirmation":
+        consoleLine("confirm", `${ev.tool} needs confirmation`, (ev.permissions || []).join(", "));
+        break;
+      case "tool_call":
+        consoleLine("call", `${ev.tool}(${truncate(pretty(ev.args), 100)})`);
+        break;
+      case "tool_result": {
+        const step = {
+          tool: ev.tool,
+          args: (steps[steps.length - 1] && steps[steps.length - 1].args) || {},
+          success: ev.success,
+          result: ev.result,
+          error: ev.error,
+        };
+        steps.push(step);
+        const tag = ev.needs_confirmation
+          ? "needs confirmation"
+          : ev.success
+          ? "ok"
+          : "error";
+        consoleLine(
+          "result",
+          `${ev.tool} → ${tag}${ev.error ? ": " + ev.error : ""}`,
+          ev.duration_ms != null ? `${ev.duration_ms} ms` : ""
+        );
+        break;
+      }
+      case "message":
+        gotFinal = true;
+        bubble.textContent = ev.text || "(no response)";
+        if (ev.provider) bubble.dataset.provider = ev.provider;
+        attachTrace(bubble, steps);
+        consoleLine("reply", truncate(ev.text, 200), ev.provider || "");
+        break;
+      case "error":
+        consoleLine("error", ev.error || "unknown error");
+        if (!gotFinal) bubble.textContent = "Error: " + (ev.error || "unknown");
+        break;
+      case "done":
+        finishStream();
+        break;
+      default:
+        break;
+    }
+  };
+
+  stream.onerror = () => {
+    // If the stream failed before producing anything, fall back to the
+    // non-streaming endpoint so the user still gets an answer.
+    if (!sawAny && !gotFinal) {
+      stream.close();
+      stream = null;
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, mode }),
+      })
+        .then((r) => r.json())
+        .then((body) => {
+          bubble.textContent = body.text || "(no response)";
+          if (body.provider) bubble.dataset.provider = body.provider;
+          consoleLine("reply", truncate(body.text, 200), body.provider || "");
+          setConsoleState("done", "ok");
+        })
+        .catch((err) => {
+          bubble.textContent = `Error: ${err.message}`;
+          setConsoleState("error", "err");
+        });
+    } else {
+      finishStream();
+    }
+  };
+}
+
+/* ---------------------------------------------------------------- chat */
+function sendChat() {
   const input = document.getElementById("chat-input");
   const message = input.value.trim();
   if (!message) return;
   input.value = "";
-  addChat("user", message);
-  const pending = document.createElement("div");
-  pending.className = "msg assistant";
-  pending.textContent = "...";
-  chatLog.appendChild(pending);
-  chatLog.scrollTop = chatLog.scrollHeight;
-  try {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, mode: document.getElementById("chat-mode").value }),
-    });
-    const body = await res.json();
-    pending.textContent = body.text || "(no response)";
-    if (body.provider) pending.dataset.provider = body.provider;
-  } catch (err) {
-    pending.textContent = `Error: ${err.message}`;
-  }
-  chatLog.scrollTop = chatLog.scrollHeight;
+  runAgent(message);
+}
+
+function sendConsole() {
+  const input = document.getElementById("console-input");
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = "";
+  runAgent(message);
 }
 
 document.getElementById("chat-send").addEventListener("click", sendChat);
 document.getElementById("chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
+});
+document.getElementById("console-send").addEventListener("click", sendConsole);
+document.getElementById("console-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendConsole();
+});
+document.getElementById("console-clear").addEventListener("click", () => {
+  agentLog.innerHTML = "";
+  setConsoleState("idle");
 });
 
 /* --------------------------------------------------------------- tools */

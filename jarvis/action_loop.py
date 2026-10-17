@@ -8,8 +8,10 @@ lets confirmation-gated tools be approved (interactive) or safely declined
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
 
+from . import events
 from .logging import get_logger
 from .tools import ToolRegistry, get_enhanced_registry
 
@@ -53,7 +55,9 @@ class ActionLoop:
         history: Optional[List[dict]] = None,
         context: Optional[List[dict]] = None,
         provider: Optional[str] = None,
+        on_event: Optional[events.EventHandler] = None,
     ) -> Dict[str, Any]:
+        emitter = events.EventEmitter(on_event)
         history = list(history or [])
         context = list(context or [])
         steps: List[Dict[str, Any]] = []
@@ -78,8 +82,20 @@ class ActionLoop:
                 tool = decision.get("tool")
                 args = decision.get("args") or {}
                 perms = self._perms_for(tool)
+                await emitter.emit(
+                    events.EVT_THOUGHT,
+                    text=f"Routing to tool '{tool}'",
+                    step=len(steps) + 1,
+                    tool=tool,
+                )
                 confirm = True
                 if any(self.registry.perms.needs_confirmation(p) for p in perms):
+                    await emitter.emit(
+                        events.EVT_CONFIRMATION,
+                        tool=tool,
+                        permissions=perms,
+                        step=len(steps) + 1,
+                    )
                     if self.interactive:
                         if not self._ask_user(tool, perms):
                             return {
@@ -93,13 +109,34 @@ class ActionLoop:
                         # Let the registry surface a needs_confirmation result honestly.
                         confirm = False
 
+                await emitter.emit(
+                    events.EVT_TOOL_CALL,
+                    step=len(steps) + 1,
+                    tool=tool,
+                    args=args,
+                    permissions=perms,
+                )
+                started = time.perf_counter()
                 res = self.registry.execute(tool, confirm=confirm, **args)
+                duration_ms = round((time.perf_counter() - started) * 1000, 1)
+                payload = res.to_dict()
+                await emitter.emit(
+                    events.EVT_TOOL_RESULT,
+                    step=len(steps) + 1,
+                    tool=tool,
+                    success=res.success,
+                    result=res.result,
+                    error=res.error,
+                    duration_ms=duration_ms,
+                    needs_confirmation=bool((res.meta or {}).get("needs_confirmation")),
+                )
                 steps.append(
                     {
                         "step": len(steps) + 1,
                         "tool": tool,
                         "args": args,
-                        "result": res.to_dict(),
+                        "result": payload,
+                        "duration_ms": duration_ms,
                     }
                 )
                 if not res.success:

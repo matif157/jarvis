@@ -15,6 +15,7 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="agent">Agent</button>
       <button class="tab" data-tab="tools">Tools</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -22,7 +23,7 @@
     <!-- CHAT -->
     <section id="tab-chat" class="panel active">
       <h2>Chat</h2>
-      <p class="hint">Talk to Jarvis. Uses your configured provider; falls back to offline basics.</p>
+      <p class="hint">Talk to Jarvis. Responses stream a live step trace you can expand under each reply. Uses your configured provider; falls back to offline basics.</p>
       <div id="chat-log" class="chat-log"></div>
       <div class="chat-controls">
         <select id="chat-mode">
@@ -33,6 +34,21 @@
         </select>
         <input id="chat-input" placeholder="Ask Jarvis anything..." autocomplete="off">
         <button id="chat-send">SEND</button>
+      </div>
+    </section>
+
+    <!-- AGENT CONSOLE -->
+    <section id="tab-agent" class="panel">
+      <h2>Agent console</h2>
+      <p class="hint">Everything Jarvis is doing in real time: routing, tool calls, arguments, results and timing.</p>
+      <div class="console-bar">
+        <span id="console-state" class="console-state">idle</span>
+        <button id="console-clear">CLEAR</button>
+      </div>
+      <div id="agent-log" class="agent-log"></div>
+      <div class="chat-controls">
+        <input id="console-input" placeholder="Run a task and watch it work..." autocomplete="off">
+        <button id="console-send">RUN</button>
       </div>
     </section>
 
