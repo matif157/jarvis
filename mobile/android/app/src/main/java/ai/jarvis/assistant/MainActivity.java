@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -15,8 +14,6 @@ import com.chaquo.python.android.AndroidPlatform;
 public class MainActivity extends Activity {
     private WebView webView;
     private Handler handler;
-    private final int MAX_RETRIES = 60;
-    private int retries = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -29,9 +26,16 @@ public class MainActivity extends Activity {
             Python.start(new AndroidPlatform(this));
         }
 
+        // Start server first
         startServer();
+        
+        // Wait a bit then set up and load WebView
+        handler.postDelayed(this::setupAndLoad, 3000);
+    }
+
+    private void setupAndLoad() {
         setupWebView();
-        loadWithRetry();
+        loadWebView();
     }
 
     private void setupWebView() {
@@ -44,7 +48,6 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
-        webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -55,28 +58,20 @@ public class MainActivity extends Activity {
     }
 
     private void startServer() {
-        Thread serverThread = new Thread(() -> {
+        new Thread(() -> {
             try {
                 Python py = Python.getInstance();
                 py.getModule("run_server").callAttr("start", getFilesDir().getAbsolutePath());
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        });
-        serverThread.start();
+        }).start();
     }
 
-    private void loadWithRetry() {
-        handler.postDelayed(() -> {
-            if (retries >= MAX_RETRIES) {
-                return;
-            }
-            retries++;
-            if (webView != null) {
-                webView.loadUrl("http://127.0.0.1:8771/");
-            }
-            loadWithRetry();
-        }, 250);
+    private void loadWebView() {
+        if (webView != null) {
+            webView.loadUrl("http://127.0.0.1:8771/");
+        }
     }
 
     @Override

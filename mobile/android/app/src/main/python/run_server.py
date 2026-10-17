@@ -3,6 +3,7 @@
 import os
 import sys
 import threading
+import time
 
 _started = False
 _lock = threading.Lock()
@@ -31,11 +32,14 @@ def start(files_dir, host="127.0.0.1", port=8771):
 
         def _run():
             try:
-                uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
+                # Run in blocking mode - critical for server to bind
+                uvicorn.run(app, host=host, port=port, log_level="error", access_log=False)
             except Exception as e:
                 print("UVICORN_ERROR:", e, file=sys.stderr)
 
-        t = threading.Thread(target=_run, daemon=False)
+        t = threading.Thread(target=_run, daemon=True)
         t.start()
+        # Give server time to start up
+        time.sleep(2)
     except Exception as e:
         print("SERVER_START_ERROR:", e, file=sys.stderr)
