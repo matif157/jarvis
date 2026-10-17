@@ -207,6 +207,33 @@ HANDLERS = {
 }
 
 
+def _engine_llm_mode() -> str:
+    """The chat engine choice: auto | cloud | on_device."""
+    try:
+        from . import engines
+
+        return str(engines.get("llm", "auto") or "auto")
+    except Exception:  # noqa: BLE001 - engine settings must never break chat
+        return "auto"
+
+
+async def _on_device_reply(
+    messages: List[dict], temperature: float, max_tokens: int
+) -> Tuple[Optional[str], Optional[str]]:
+    """Run the query on the LiteRT-LM engine: (text, error)."""
+    try:
+        from . import ondevice
+    except Exception as exc:  # noqa: BLE001
+        return None, f"on-device unavailable: {exc}"
+    if not ondevice.is_ready():
+        return None, "no on-device model loaded"
+    try:
+        text = await asyncio.to_thread(ondevice.chat, messages, max_tokens)
+        return text, None
+    except Exception as exc:  # noqa: BLE001 - engine errors fall back cleanly
+        return None, f"on-device: {exc}"
+
+
 async def complete(
     messages: List[dict],
     temperature: float = 0.4,
@@ -214,25 +241,44 @@ async def complete(
 ) -> Tuple[str, str]:
     """Return (text, provider_used). Raises if every provider fails."""
     last_error: Optional[Exception] = None
+    mode = _engine_llm_mode()
+    tried_on_device = False
 
-    for name in PROVIDER_ORDER:
-        if not provider_enabled(name):
-            continue
-        handler = HANDLERS.get(name)
-        if handler is None:
-            continue
-        try:
-            text = await handler(
-                provider_model(name),
-                messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            if text and text.strip():
-                return text.strip(), name
-        except Exception as exc:  # noqa: BLE001 - try the next provider
-            last_error = exc
-            continue
+    if mode == "on_device" or (mode == "auto" and not has_provider()):
+        tried_on_device = True
+        text, err = await _on_device_reply(messages, temperature, max_tokens)
+        if text:
+            return text, "on_device"
+        last_error = err
+        if mode == "on_device":
+            raise ProviderError(f"no provider available: {last_error}")
+
+    if mode != "on_device":
+        for name in PROVIDER_ORDER:
+            if not provider_enabled(name):
+                continue
+            handler = HANDLERS.get(name)
+            if handler is None:
+                continue
+            try:
+                text = await handler(
+                    provider_model(name),
+                    messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if text and text.strip():
+                    return text.strip(), name
+            except Exception as exc:  # noqa: BLE001 - try the next provider
+                last_error = exc
+                continue
+
+        if mode == "auto" and not tried_on_device:
+            text, err = await _on_device_reply(messages, temperature, max_tokens)
+            if text:
+                return text, "on_device"
+            if err and last_error is None:
+                last_error = err
 
     raise ProviderError(f"no provider available: {last_error}")
 
@@ -408,6 +454,21 @@ async def test_provider(
 
 async def active_provider(prefer: Optional[str] = None) -> Optional[str]:
     """The first enabled provider that is actually usable right now."""
+    mode = _engine_llm_mode()
+    try:
+        from . import ondevice
+
+        on_device_ready = ondevice.is_ready()
+    except Exception:  # noqa: BLE001
+        on_device_ready = False
+
+    if mode == "on_device":
+        return "on_device" if on_device_ready else None
+    if prefer == "on_device":
+        return "on_device" if on_device_ready else None
+    if mode == "auto" and not has_provider() and on_device_ready:
+        return "on_device"
+
     order = list(PROVIDER_ORDER)
     if prefer and prefer in order:
         order = [prefer] + [p for p in order if p != prefer]
@@ -420,4 +481,7 @@ async def active_provider(prefer: Optional[str] = None) -> Optional[str]:
             continue
         if provider_key(name):
             return name
+
+    if mode == "auto" and on_device_ready:
+        return "on_device"
     return None

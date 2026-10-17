@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-17 (Phase 19 - On-device LLM & model download manager / v1.2.0)
+- **New `jarvis/ondevice.py`**: model catalogue (Gemma 3 270M / Gemma 3 1B / Gemma 4 E2B `.litertlm` builds, exact byte sizes), a resumable-free download manager (`<data dir>/models`, streamed in 256 KB chunks with live progress/speed, free-space pre-check, `.part` staging, size verification, cancel) and the engine bridge (`is_ready`/`load`/`unload`/`chat`). Downloads authenticate with the `hf` service key when set. Gated repos produce an actionable message (set token + accept the Gemma licence on huggingface.co).
+- **Chat routing on-device** (`jarvis/llm.py`): new `chat.llm=on_device` engine mode goes straight to the local model (`ProviderError` when none is loaded); `auto` prefers a configured cloud provider and falls back to the on-device engine when no key is set; `cloud` is unchanged. `active_provider()` reports `on_device`.
+- **New endpoints** (`jarvis/app.py`): `GET /api/ondevice/info`, `GET /api/ondevice/models`, and `POST /api/ondevice/{download,cancel,delete,load,unload,generate}` — exact error codes for unknown model (404), already installed / not downloaded / no download in progress / not enough space (409).
+- **Settings UI**: **On-device model** section — per-model cards with size/RAM hints, live download progress bar, cancel/delete/load/unload buttons, and a checklist entry showing when offline chat is ready.
+- **Android bridge** (`ai.jarvis.assistant.llm.OnDeviceLlm`, Java): LiteRT-LM `com.google.ai.edge.litertlm:litertlm-android:0.18.0` (CPU backend), serialised load/unload/generate, JSON in/out so Python stays stateless; `deviceInfo()` reports RAM and ABIs from `/proc/meminfo`.
+- **APK**: now arm64-v8a only (LiteRT-LM native libs double the size; Apple-Silicon emulators and the target phone are arm64). Building the app now requires **JDK 21** (the AAR ships Java 21 class files).
+- Added `tests/test_phase19_ondevice.py` (8 offline checks: catalogue sanity, streamed install/verify/delete, cancel cleanup, gated-token error, endpoint behaviour, bridge wiring into `llm.complete`, honest failure without a model, UI assets).
+- Full regression suite passes (**357 tests across 35 modules**).
+
 ## 2026-10-17 (Phase 18 - Guided key setup & engine manager / v1.1.0)
 - **New `jarvis/service_keys.py`**: local storage for non-LLM service tokens (`hf`, `picovoice`) under `secret.<name>` in the settings table — masked (`…abcd`) in every payload, raw value never returned by any endpoint.
 - **New `jarvis/engines.py`**: validated engine selection per component (`llm`: auto/cloud/on_device, `stt`: on_device/cloud/auto, `image`: local/cloud/off), persisted under `engine.<name>`; invalid values are rejected before reaching the DB. Consumers land with their phases (on-device LLM, mobile voice, local image service).

@@ -15,6 +15,9 @@ const checklistEl = document.getElementById("setup-checklist");
 const serviceKeysEl = document.getElementById("service-keys-list");
 const enginesEl = document.getElementById("engines-list");
 const enginesStatus = document.getElementById("engines-status");
+const ondeviceInfoEl = document.getElementById("ondevice-info");
+const ondeviceListEl = document.getElementById("ondevice-list");
+const ondeviceStatusEl = document.getElementById("ondevice-status");
 
 let selectedTool = null;
 let stream = null; // active EventSource
@@ -24,6 +27,8 @@ let statusData = null;
 let providersData = [];
 let serviceKeysData = [];
 let enginesData = null;
+let ondeviceData = null;
+let odPollTimer = null;
 
 /* ---------------------------------------------------------------- tabs */
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -581,6 +586,24 @@ function renderSetup() {
       null
     );
   }
+
+  const od = ondeviceData;
+  if (od) {
+    const supported = !!(od.device && od.device.supported);
+    const forced = od.engine_mode === "on_device";
+    if (supported || forced) {
+      setupItem(
+        !!od.ready,
+        "Offline chat (on-device)",
+        od.ready
+          ? `${od.loaded} loaded - private, offline answers`
+          : forced
+            ? "Engine is on-device but no model is loaded - download one below."
+            : "Optional: download a model below for private offline chat.",
+        "#ondevice"
+      );
+    }
+  }
 }
 
 /* ---------------------------------------------------- service API keys */
@@ -716,9 +739,180 @@ async function saveEngines() {
     if (!res.ok) throw new Error((await res.json()).error || "save failed");
     enginesStatus.textContent = "Saved.";
     await loadEngines();
+    await loadOnDevice();
   } catch (err) {
     enginesStatus.textContent = `Failed: ${err.message}`;
   }
+}
+
+/* --------------------------------------------------- on-device model mgr */
+function fmtBytes(n) {
+  n = n || 0;
+  if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB";
+  if (n >= 1048576) return Math.round(n / 1048576) + " MB";
+  if (n >= 1024) return Math.round(n / 1024) + " KB";
+  return n + " B";
+}
+
+function odCard(m) {
+  const card = document.createElement("div");
+  card.className = "od-card";
+
+  const head = document.createElement("div");
+  head.className = "phead";
+  const title = document.createElement("strong");
+  title.textContent = m.label;
+  const badge = document.createElement("span");
+  badge.className =
+    "pbadge" + (m.loaded ? " pok" : m.state === "error" ? " pbad" : "");
+  badge.textContent = m.loaded
+    ? "LOADED"
+    : m.state === "downloading"
+      ? "DOWNLOADING"
+      : m.state === "error"
+        ? "ERROR"
+        : m.installed
+          ? "INSTALLED"
+          : "NOT DOWNLOADED";
+  head.append(title, badge);
+  card.appendChild(head);
+
+  const note = document.createElement("div");
+  note.className = "pnote";
+  note.textContent = `${fmtBytes(m.size)} - needs ${m.min_ram_gb} GB RAM - ${m.description}`;
+  card.appendChild(note);
+
+  if (m.state === "downloading") {
+    const bar = document.createElement("div");
+    bar.className = "od-bar";
+    const fill = document.createElement("div");
+    fill.className = "od-fill";
+    fill.style.width = (m.progress || 0) + "%";
+    bar.appendChild(fill);
+    const pct = document.createElement("div");
+    pct.className = "pnote";
+    pct.textContent = `${m.progress || 0}% - ${fmtBytes(m.done_bytes)} of ${fmtBytes(m.size)}`;
+    card.append(bar, pct);
+  }
+  if (m.error) {
+    const err = document.createElement("div");
+    err.className = "pnote od-err";
+    err.textContent = m.error;
+    card.appendChild(err);
+  }
+
+  const row = document.createElement("div");
+  row.className = "form-actions";
+  const mk = (label, action) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.dataset.odAction = action;
+    b.dataset.odId = m.id;
+    return b;
+  };
+  if (m.state === "downloading") {
+    row.appendChild(mk("CANCEL", "cancel"));
+  } else if (!m.installed) {
+    row.appendChild(mk("DOWNLOAD", "download"));
+    if (m.partial_bytes > 0) row.appendChild(mk("DELETE PARTIAL", "delete"));
+  } else {
+    if (m.loaded) row.appendChild(mk("UNLOAD", "unload"));
+    else row.appendChild(mk("LOAD", "load"));
+    row.appendChild(mk("DELETE", "delete"));
+  }
+  card.appendChild(row);
+  return card;
+}
+
+function renderOnDevice() {
+  if (!ondeviceListEl || !ondeviceData) return;
+  const dev = ondeviceData.device || {};
+  const bits = [];
+  if (dev.supported) {
+    if (dev.mem_total_bytes)
+      bits.push(`${(dev.mem_total_bytes / 1073741824).toFixed(1)} GB RAM`);
+    if (dev.abis && dev.abis.length) bits.push(dev.abis[0]);
+    bits.push(
+      ondeviceData.ready
+        ? `engine loaded: ${ondeviceData.loaded}`
+        : "engine not loaded"
+    );
+  } else {
+    bits.push(dev.reason || "On-device chat requires the Android app.");
+  }
+  ondeviceInfoEl.textContent = bits.join(" - ");
+  ondeviceListEl.innerHTML = "";
+  for (const m of ondeviceData.models || [])
+    ondeviceListEl.appendChild(odCard(m));
+}
+
+function scheduleOdPoll() {
+  const busy = ((ondeviceData && ondeviceData.models) || []).some(
+    (m) => m.state === "downloading"
+  );
+  if (busy && !odPollTimer) {
+    odPollTimer = setInterval(loadOnDevice, 1500);
+  } else if (!busy && odPollTimer) {
+    clearInterval(odPollTimer);
+    odPollTimer = null;
+  }
+}
+
+async function loadOnDevice() {
+  if (!ondeviceListEl) return;
+  try {
+    const [info, models] = await Promise.all([
+      fetch("/api/ondevice/info").then((r) => r.json()),
+      fetch("/api/ondevice/models").then((r) => r.json()),
+    ]);
+    ondeviceData = {
+      device: info.device,
+      ready: info.ready || models.ready,
+      loaded: info.loaded || models.loaded,
+      engine_mode: info.engine_mode,
+      models: models.models || [],
+    };
+    renderOnDevice();
+    scheduleOdPoll();
+  } catch {
+    ondeviceInfoEl.textContent = "Could not load on-device status.";
+  }
+  renderSetup();
+}
+
+async function onDeviceAction(action, id) {
+  if (action === "delete" && !confirm(`Delete ${id}?`)) return;
+  ondeviceStatusEl.textContent = `${action.toUpperCase()} ${id}...`;
+  try {
+    const res = await fetch(`/api/ondevice/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false)
+      throw new Error(data.error || `HTTP ${res.status}`);
+    ondeviceStatusEl.textContent =
+      action === "download"
+        ? "Download started - progress appears on the card."
+        : action === "delete"
+          ? "Deleted."
+          : action === "load"
+            ? "Model loaded - offline chat is ready."
+            : action === "unload"
+              ? "Model unloaded."
+              : "Download cancelled.";
+  } catch (err) {
+    ondeviceStatusEl.textContent = `Failed: ${err.message}`;
+  }
+  await loadOnDevice();
+}
+
+if (ondeviceListEl) {
+  ondeviceListEl.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-od-action]");
+    if (btn) onDeviceAction(btn.dataset.odAction, btn.dataset.odId);
+  });
 }
 
 async function loadSettings() {
@@ -760,3 +954,4 @@ loadSettings();
 loadTools();
 loadServiceKeys();
 loadEngines();
+loadOnDevice();

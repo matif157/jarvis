@@ -236,3 +236,10 @@ label.inline { flex-direction: row; align-items: center; gap: 8px; text-transfor
 .ck-item.clickable { cursor: pointer; }
 .ck-item.clickable:hover { border-color: var(--acc); }
 
+
+/* on-device model manager */
+.od-list { display: flex; flex-direction: column; gap: 12px; }
+.od-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.od-bar { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.od-fill { height: 100%; background: var(--acc); width: 0; transition: width .4s; }
+.od-err { color: var(--warn); overflow-wrap: anywhere; }

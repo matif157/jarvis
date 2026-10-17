@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, engines, llm, service_keys
+from . import db, engines, llm, ondevice, service_keys
 from . import __version__
 from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
@@ -63,6 +63,12 @@ class EnginesIn(BaseModel):
     llm: Optional[str] = None
     stt: Optional[str] = None
     image: Optional[str] = None
+
+
+class OnDeviceIn(BaseModel):
+    id: Optional[str] = None
+    prompt: Optional[str] = None
+    max_tokens: Optional[int] = None
 
 
 @app.on_event("startup")
@@ -276,6 +282,107 @@ def set_engines(payload: EnginesIn) -> JSONResponse:
     for k, v in updates.items():
         engines.set(k, v)
     return JSONResponse({"ok": True, "engines": engines.snapshot()})
+
+
+def _ondevice_error(exc: ondevice.OnDeviceError) -> JSONResponse:
+    msg = str(exc)
+    if msg.startswith("unknown model"):
+        code = 404
+    elif (
+        msg.startswith("already")
+        or msg.startswith("cancel the")
+        or msg.startswith("no download")
+        or msg.startswith("not enough")
+    ):
+        code = 409
+    else:
+        code = 400
+    return JSONResponse({"ok": False, "error": msg}, status_code=code)
+
+
+@app.get("/api/ondevice/info")
+def ondevice_info() -> dict:
+    """Device capability and engine state for the on-device LLM."""
+    return {
+        "device": ondevice.device_info(),
+        "ready": ondevice.is_ready(),
+        "loaded": ondevice.loaded_id(),
+        "engine_mode": engines.get("llm"),
+    }
+
+
+@app.get("/api/ondevice/models")
+def ondevice_models() -> dict:
+    """Model catalogue with download, install and load state."""
+    return {
+        "models": ondevice.status(),
+        "loaded": ondevice.loaded_id(),
+        "ready": ondevice.is_ready(),
+    }
+
+
+@app.post("/api/ondevice/download")
+def ondevice_download(payload: OnDeviceIn) -> JSONResponse:
+    try:
+        res = ondevice.start_download(payload.id or "")
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+    return JSONResponse({"ok": True, **res}, status_code=202)
+
+
+@app.post("/api/ondevice/cancel")
+def ondevice_cancel(payload: OnDeviceIn) -> JSONResponse:
+    try:
+        res = ondevice.cancel_download(payload.id or "")
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+    return JSONResponse({"ok": True, **res})
+
+
+@app.post("/api/ondevice/delete")
+def ondevice_delete(payload: OnDeviceIn) -> JSONResponse:
+    try:
+        res = ondevice.remove(payload.id or "")
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+    return JSONResponse({"ok": True, **res})
+
+
+@app.post("/api/ondevice/load")
+async def ondevice_load(payload: OnDeviceIn) -> JSONResponse:
+    try:
+        res = await asyncio.to_thread(ondevice.load, payload.id or "")
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+    return JSONResponse({"ok": True, **res})
+
+
+@app.post("/api/ondevice/unload")
+async def ondevice_unload() -> JSONResponse:
+    try:
+        res = await asyncio.to_thread(ondevice.unload)
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+    return JSONResponse({"ok": True, **res})
+
+
+@app.post("/api/ondevice/generate")
+async def ondevice_generate(payload: OnDeviceIn) -> JSONResponse:
+    prompt = (payload.prompt or "").strip()
+    if not prompt:
+        return JSONResponse(
+            {"ok": False, "error": "prompt required"}, status_code=400
+        )
+    limit = max(16, min(int(payload.max_tokens or 512), 4096))
+    try:
+        text = await asyncio.to_thread(
+            ondevice.chat,
+            [{"role": "user", "content": prompt}],
+            limit,
+        )
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+    return JSONResponse({"ok": True, "text": text, "provider": "on_device"})
 
 
 @app.get("/api/providers")
