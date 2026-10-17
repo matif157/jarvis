@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -26,6 +27,8 @@ import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Voice bridge between the Python app (Chaquopy) and Android's speech stack.
@@ -136,6 +139,60 @@ public final class VoiceBridge {
             }
         }
         return ok().toString();
+    }
+
+    /**
+     * {"path": "..."} -> {ok, duration_ms} - plays an audio file (cloud TTS
+     * fallback for languages the platform voice reads badly). Blocks until
+     * playback finishes or 120 s elapse.
+     */
+    public static String playAudio(String requestJson) {
+        MediaPlayer[] holder = new MediaPlayer[1];
+        CountDownLatch latch = new CountDownLatch(1);
+        long[] started = {0};
+        try {
+            JSONObject request = new JSONObject(requestJson);
+            String path = request.optString("path", "").trim();
+            if (path.isEmpty()) {
+                return error("path required");
+            }
+            File file = new File(path);
+            if (!file.exists() || !file.isFile() || file.length() == 0) {
+                return error("audio file not found: " + path);
+            }
+            started[0] = System.currentTimeMillis();
+            MediaPlayer player = new MediaPlayer();
+            holder[0] = player;
+            player.setOnCompletionListener(mp -> latch.countDown());
+            player.setOnErrorListener((mp, what, extra) -> {
+                latch.countDown();
+                return true;
+            });
+            player.setDataSource(path);
+            player.prepare();
+            player.start();
+            latch.await(120, TimeUnit.SECONDS);
+            long duration = System.currentTimeMillis() - started[0];
+            return ok().put("duration_ms", duration).toString();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return error("interrupted");
+        } catch (Throwable t) {
+            return error(describe(t));
+        } finally {
+            if (holder[0] != null) {
+                try {
+                    holder[0].stop();
+                } catch (Throwable ignored) {
+                    // best effort
+                }
+                try {
+                    holder[0].release();
+                } catch (Throwable ignored) {
+                    // best effort
+                }
+            }
+        }
     }
 
     /** {"language": optional} -> {ok, voices: [names]} */

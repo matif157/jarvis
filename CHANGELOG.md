@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-18 (Urdu TTS quality: script auto-detect + cloud fallback / v1.5.1)
+- **Problem**: stock Android/desktop voices read Urdu (Arabic-script) text with an English accent — unusable for real Urdu speech.
+- **Auto-detect** (`jarvis/voice.py`): new `detect_language()` returns `ur-PK` when >30% of a text's letters are in the Urdu/Arabic block; `speak_text()` applies it whenever no explicit language was passed, so Urdu replies, SAY taps and the `voice.speak` tool are routed correctly with zero UI change. Roman Urdu (latin script) stays on the default voice.
+- **Platform-voice probe**: `_has_language_voice("ur")` (cached) asks the engine for Urdu voices — Android through `list_voices("ur")`, macOS through `say -v ?`. A device that *does* ship an Urdu voice keeps using it offline (and now gets the explicit `ur-PK` tag it previously missed).
+- **Cloud fallback**: when the platform has no Urdu voice, `cloud_tts()` fetches speech from Google Translate TTS (httpx, no API key, chunked at 180 chars, MP3 validated) and plays it — through the new Java `VoiceBridge.playAudio` (MediaPlayer, blocks until completion, 120 s cap) on-device, `afplay` on macOS. The temp file is always cleaned up. If the network fetch fails, the platform voice still speaks (with the `ur-PK` tag) rather than silence.
+- **New Android bridge method** (`VoiceBridge.playAudio`): `{"path": ...}` → `{ok, duration_ms}`; errors are honest (missing/empty file).
+- **Provider reporting**: `AndroidTTS`/`MacSayTTS` remember the backend actually used (`last_provider`), so `/api/voice/speak` and the `voice.speak` tool report `cloud_tts` vs `android_tts`/`macos_say` truthfully, and the endpoint now returns the resolved `language`.
+- Added `tests/test_phase23_urdu_tts.py` (7 offline checks: detection heuristic incl. roman- Urdu and mixed-script cases, chunking, fetch/play/cleanup against a local fake Translate-TTS server, routing by device capability + honest degradation on network failure, macOS `say` shortcut, endpoint provider reporting + Java source markers, manager/tool compatibility).
+- Full regression suite passes (**408 tests across 39 modules**).
+- **APK v1.5.1 (versionCode 9)**, arm64-v8a.
+
+
 ## 2026-10-18 (Phase 22 - WhatsApp bridge: live reading, rules, replies / v1.5.0)
 - **New table `wa_messages`** (`jarvis/db.py`): chat, sender, direction (`in`/`out`/`system`), text, sortable `ts`, `source` (`live`/`export`), a content `hash` (UNIQUE, minute granularity) and `created_at` — indexed by chat, with `last_outbound_ts_db` powering the reply cooldown. Migrations stay idempotent.
 - **New `jarvis/whatsapp.py`**: the WhatsApp layer.

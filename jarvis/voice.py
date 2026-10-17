@@ -20,13 +20,12 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .logging import get_logger
-from .permissions import PermissionManager
 from .security import is_path_safe
 from .service_keys import get_key as get_service_key
 from .tools import Tool, ToolResult
@@ -44,6 +43,14 @@ CLOUD_STT_TIMEOUT = 60.0
 
 # A ``voice`` argument that is really a language tag ("ur", "en-US")
 LANGUAGE_TAG_RE = re.compile(r"^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?$")
+
+# Urdu / cloud TTS (quality fix: stock voices read Urdu script with an
+# English accent, so Urdu text falls back to Google Translate TTS.)
+URDU_SCRIPT_RE = re.compile(r"[\u0600-\u06FF]")
+TRANSLATE_TTS_URL = "https://translate.google.com/translate_tts"
+TRANSLATE_TTS_TIMEOUT = 30.0
+TTS_CHUNK_CHARS = 180  # the endpoint caps per-request length
+TTS_USER_AGENT = "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36"
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +84,7 @@ def clear_backend() -> None:
     _voice_probed = False
     _wake_cache = None
     _wake_probed = False
+    _urdu_voice_cache[0] = None
 
 
 def _voice_bridge() -> Any:
@@ -153,16 +161,157 @@ def android_status() -> Dict[str, Any]:
     return data
 
 
+def detect_language(text: str) -> Optional[str]:
+    """Best-effort language tag from the script of ``text``.
+
+    Returns ``"ur-PK"`` when the text is predominantly Urdu (Arabic) script,
+    otherwise None - callers keep their default (English) behaviour.
+    """
+    letters = [ch for ch in (text or "") if ch.isalpha()]
+    if not letters:
+        return None
+    urdu = sum(1 for ch in letters if "\u0600" <= ch <= "\u06ff")
+    if urdu / len(letters) > 0.3:
+        return "ur-PK"
+    return None
+
+
+_urdu_voice_cache: Any = [None]  # None = unknown, True/False once probed
+
+
+def _has_language_voice(language: str) -> bool:
+    """Whether the local TTS engine reports voices for ``language`` (cached)."""
+    tag = (language or "").split("-")[0].lower()
+    if not tag:
+        return False
+    if tag == "ur" and _urdu_voice_cache[0] is not None:
+        return bool(_urdu_voice_cache[0])
+    voices = list_voices(tag) if is_android() else MacSayTTS().voices()
+    has = any(
+        tag in v.lower().replace("_", "-")
+        or v.lower().startswith(tag)
+        for v in voices
+    )
+    if tag == "ur":
+        _urdu_voice_cache[0] = has
+    return has
+
+
+def _tts_chunks(text: str, limit: int = TTS_CHUNK_CHARS) -> List[str]:
+    """Split ``text`` into TTS-sized pieces on whitespace."""
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return [text] if text else []
+    chunks: List[str] = []
+    current = ""
+    for word in text.split(" "):
+        if current and len(current) + 1 + len(word) > limit:
+            chunks.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _fetch_translate_tts(text: str, language: str) -> bytes:
+    """Fetch one MP3 chunk from Google Translate TTS (no key required)."""
+    import httpx
+
+    lang = (language or "ur").split("-")[0]
+    resp = httpx.get(
+        TRANSLATE_TTS_URL,
+        params={"ie": "UTF-8", "q": text[:TTS_CHUNK_CHARS], "tl": lang, "client": "tw-ob"},
+        headers={"User-Agent": TTS_USER_AGENT},
+        timeout=TRANSLATE_TTS_TIMEOUT,
+    )
+    if resp.status_code != 200 or not resp.content:
+        raise VoiceError(f"cloud TTS failed (HTTP {resp.status_code})")
+    head = resp.content[:3]
+    if not (head == b"ID3" or (len(resp.content) > 1 and resp.content[0] == 0xFF)):
+        raise VoiceError("cloud TTS returned non-audio data")
+    return resp.content
+
+
+def _play_audio_file(path: str) -> None:
+    """Play an audio file: Android bridge on-device, ``afplay`` on macOS."""
+    bridge = _voice_bridge()
+    if bridge is not None:
+        _call(bridge, "playAudio", {"path": path})
+        return
+    player = shutil.which("afplay")
+    if not player:
+        raise VoiceError("no audio player available on this system")
+    try:
+        subprocess.run([player, path], timeout=SPEAK_TIMEOUT_SECONDS, check=True)
+    except subprocess.TimeoutExpired as exc:
+        raise VoiceError("audio playback timed out") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise VoiceError(f"audio playback failed: {exc}") from exc
+
+
+def cloud_tts(text: str, language: str = "ur-PK") -> Dict[str, Any]:
+    """Speak ``text`` via Google Translate TTS (chunked MP3, needs internet).
+
+    Used when the platform synthesiser has no voice for the language - most
+    stock Android/iOS/desktop engines read Urdu script with an English
+    accent, which is exactly the complaint this fixes.
+    """
+    text = (text or "").strip()
+    if not text:
+        raise VoiceError("nothing to speak")
+    chunks = _tts_chunks(text[:MAX_SPEAK_CHARS])
+    if not chunks:
+        raise VoiceError("nothing to speak")
+    parts: List[bytes] = []
+    try:
+        for chunk in chunks:
+            parts.append(_fetch_translate_tts(chunk, language))
+    except VoiceError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - network failures are user-facing
+        raise VoiceError(f"cloud TTS failed: {exc}") from None
+    fd, path = tempfile.mkstemp(prefix="jarvis-tts-", suffix=".mp3")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            for part in parts:
+                fh.write(part)
+        _play_audio_file(path)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return {"ok": True, "provider": "cloud_tts", "language": language, "chars": len(text)}
+
+
 def speak_text(
     text: str,
     language: Optional[str] = None,
     rate: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Speak through the Android TTS engine (blocking until queued)."""
+    """Speak through the Android TTS engine (blocking until queued).
+
+    When no language is given, Urdu (Arabic-script) text is auto-detected
+    and spoken as ``ur-PK``; if the engine has no Urdu voice, a cloud TTS
+    fallback speaks the text instead (the platform voice reading Urdu with
+    an English accent is worse than a short network fetch).
+    """
+    text = (text or "").strip()
+    if not text:
+        raise VoiceError("nothing to speak")
+    if not language:
+        language = detect_language(text)
+    if language and language.split("-")[0].lower() == "ur" and not _has_language_voice("ur"):
+        try:
+            return cloud_tts(text, language)
+        except VoiceError as exc:
+            logger.warning(f"cloud Urdu TTS unavailable ({exc}); using the platform voice")
     bridge = _voice_bridge()
     if bridge is None:
         raise VoiceError("android text-to-speech requires the Android app")
-    payload: Dict[str, Any] = {"text": (text or "")[:MAX_SPEAK_CHARS]}
+    payload: Dict[str, Any] = {"text": text[:MAX_SPEAK_CHARS]}
     if language:
         payload["language"] = language
     if rate:
@@ -349,6 +498,8 @@ class TextToSpeechProvider(ABC):
 class MacSayTTS(TextToSpeechProvider):
     """macOS ``say`` command text-to-speech."""
 
+    last_provider = None  # actual backend used by the latest speak() call
+
     @property
     def name(self) -> str:
         return "macos_say"
@@ -378,11 +529,20 @@ class MacSayTTS(TextToSpeechProvider):
             return []
 
     def speak(self, text: str, voice: Optional[str] = None, rate: Optional[int] = None) -> Tuple[bool, str]:
-        if not self.available():
-            return False, "speech synthesis unavailable (no 'say' command)"
         if not text or not text.strip():
             return False, "nothing to speak"
         text = text[:MAX_SPEAK_CHARS]
+        # ``say`` ships no Urdu voice: Urdu script goes to the cloud TTS.
+        if not voice and detect_language(text):
+            try:
+                cloud_tts(text, "ur-PK")
+                self.last_provider = "cloud_tts"
+                return True, "spoken"
+            except VoiceError as exc:
+                logger.warning(f"cloud Urdu TTS unavailable ({exc}); using 'say'")
+        if not self.available():
+            return False, "speech synthesis unavailable (no 'say' command)"
+        self.last_provider = "macos_say"
         cmd = ["say"]
         if voice:
             cmd.extend(["-v", voice])
@@ -425,6 +585,8 @@ class MockTTS(TextToSpeechProvider):
 class AndroidTTS(TextToSpeechProvider):
     """Android platform synthesiser through the in-app Java bridge."""
 
+    last_provider = None  # actual backend used by the latest speak() call
+
     @property
     def name(self) -> str:
         return "android_tts"
@@ -443,10 +605,12 @@ class AndroidTTS(TextToSpeechProvider):
         if not text or not text.strip():
             return False, "nothing to speak"
         # ``voice`` may be a language tag ("ur", "en-US"); anything else is
-        # ignored because the platform engine selects voices itself.
+        # ignored because the platform engine selects voices itself. With no
+        # explicit voice, Urdu script is auto-detected inside speak_text.
         language = voice if voice and LANGUAGE_TAG_RE.match(voice) else None
         try:
-            speak_text(text, language=language, rate=rate)
+            data = speak_text(text, language=language, rate=rate)
+            self.last_provider = data.get("provider", "android_tts")
             return True, "spoken"
         except VoiceError as exc:
             return False, str(exc)
@@ -752,7 +916,11 @@ class VoiceSpeakTool(Tool):
             return ToolResult(success=False, error=message, tool=self.name)
         return ToolResult(
             success=True,
-            result={"spoken": True, "chars": len(text), "provider": manager.tts.name},
+            result={
+                "spoken": True,
+                "chars": len(text),
+                "provider": getattr(manager.tts, "last_provider", None) or manager.tts.name,
+            },
             tool=self.name,
         )
 

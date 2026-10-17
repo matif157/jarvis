@@ -498,9 +498,15 @@ def post_voice_speak(payload: VoiceIn) -> JSONResponse:
     try:
         if voice.is_android():
             data = voice.speak_text(text, language=language, rate=payload.rate or None)
-            out = {"ok": True, "provider": "android_tts", "chars": len(text)}
+            out = {
+                "ok": True,
+                "provider": data.get("provider", "android_tts"),
+                "chars": len(text),
+            }
             if "queued" in data:
                 out["queued"] = bool(data["queued"])
+            if data.get("language"):
+                out["language"] = data["language"]
             return JSONResponse(out)
         manager = voice.VoiceManager()
         ok, message = manager.speak(
@@ -511,7 +517,12 @@ def post_voice_speak(payload: VoiceIn) -> JSONResponse:
         if not ok:
             return _voice_error(message)
         return JSONResponse(
-            {"ok": True, "provider": manager.tts.name, "chars": len(text)}
+            {
+                "ok": True,
+                "provider": getattr(manager.tts, "last_provider", None)
+                or manager.tts.name,
+                "chars": len(text),
+            }
         )
     except voice.VoiceError as exc:
         return _voice_error(str(exc))
