@@ -222,6 +222,7 @@ def test_macsay_uses_cloud_for_urdu():
     voice.subprocess.run = fake_run
     try:
         mac = voice.MacSayTTS()
+        mac.available = lambda: True  # deterministic on CI (Linux has no `say`)
         ok, message = mac.speak(URDU_TEXT)
         assert ok and message == "spoken"
         assert spoken_say == []  # never reached `say`
