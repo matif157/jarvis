@@ -14,7 +14,7 @@ Status keys: NOT STARTED | IN PROGRESS | IMPLEMENTED | TESTED | VERIFIED WORKING
 - [x] **Document class naming/API surface** (status: VERIFIED WORKING) — Added an "Architecture & naming" section to `README.md` disambiguating `tasks.TaskManager` (to-dos) vs `engine_tasks.TaskExecutor` (agent plans), `memory.Memory` vs `memory_enhanced.EnhancedMemory`, and the router/action-loop/engine hierarchy.
 
 ## Low priority (enhancements)
-- [ ] **Weather: real API** (status: NOT STARTED) — Dependencies: optional API key/provider. Acceptance: configurable provider with safe fallback to mock; no breaking changes.
+- [x] **Weather: real API** (status: IMPLEMENTED) — Added pluggable weather provider (`mock` | `openweathermap`) with safe mock fallback on errors/missing key. Exposed `weather.get` and `weather.forecast` tools (registered in enhanced registry). Configurable via `WEATHER_PROVIDER`, `WEATHER_API_KEY`, `WEATHER_BASE_URL`, `WEATHER_DEFAULT_LOCATION`, `WEATHER_UNITS`. Added `tests/test_weather.py` (6 checks); suite 333/0 (32 modules). No breaking changes.
 - [ ] **Planner sophistication** (status: NOT STARTED) — Dependencies: none. Acceptance: better decomposition without over-engineering; preserve backward compat.
 
 # Phase 4 Memory Control: All 10 user journeys verified - save, retrieve, correct, delete, export, edge cases
