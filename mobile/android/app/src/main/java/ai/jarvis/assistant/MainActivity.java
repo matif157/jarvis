@@ -14,6 +14,8 @@ import com.chaquo.python.android.AndroidPlatform;
 public class MainActivity extends Activity {
     private WebView webView;
     private Handler handler;
+    private int attempts = 0;
+    private static final int MAX_ATTEMPTS = 120;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,16 +28,9 @@ public class MainActivity extends Activity {
             Python.start(new AndroidPlatform(this));
         }
 
-        // Start server first
         startServer();
-        
-        // Wait a bit then set up and load WebView
-        handler.postDelayed(this::setupAndLoad, 3000);
-    }
-
-    private void setupAndLoad() {
         setupWebView();
-        loadWebView();
+        tryLoad();
     }
 
     private void setupWebView() {
@@ -47,7 +42,6 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -68,10 +62,16 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void loadWebView() {
-        if (webView != null) {
-            webView.loadUrl("http://127.0.0.1:8771/");
-        }
+    private void tryLoad() {
+        handler.postDelayed(() -> {
+            if (attempts < MAX_ATTEMPTS) {
+                attempts++;
+                if (webView != null) {
+                    webView.loadUrl("http://127.0.0.1:8771/");
+                }
+                tryLoad();
+            }
+        }, 500);
     }
 
     @Override
