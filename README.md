@@ -134,6 +134,36 @@ make lint            # byte-compile the whole tree
 make test-pytest     # same suite via pytest, when installed
 ```
 
+## Architecture & naming
+
+Jarvis has a few similarly named modules/classes. This map disambiguates them.
+
+**Chat & routing**
+- `assistant.Assistant` — the user-facing orchestrator (`respond`/`answer`/`start`).
+- `router.Router` — decides *chat vs. one tool* (no side effects; decide-only).
+- `action_loop.ActionLoop` — the **single executor**: runs the chosen tool (once),
+  feeds the result back, and loops until a final answer.
+- `agent.Agent` / `engine.Engine` — higher-level goal/plan runners built on the loop.
+
+**Tasks — two different concepts**
+- `tasks.py` — **user tasks** (to-do items): `tasks.Task` (record) and
+  `tasks.TaskManager` (CRUD). Backed by the `tasks` table; exposed as `task.*` tools.
+- `engine_tasks.py` — **execution plans** (agent planning), not to-dos:
+  `TaskStep` (one step), `PlanTask` (a plan), `TaskExecutor` (runs a plan).
+
+**Memory — two layers over the same store**
+- `memory.Memory` — simple key/value memory (`remember`/`recall`/`forget`/`all`).
+- `memory_enhanced.EnhancedMemory` — session-scoped facts + search used for
+  context injection by the assistant.
+- Both persist through `db.py` (SQLite): `remember_db`/`recall_db`/… .
+  The `memory.*` tools write global keys via `db.py`.
+
+**Notes** — `db.py` helpers (`add_note_db`, `get_notes_db`) behind `note.*` tools.
+
+**Storage** — `db.py` owns the SQLite schema/connection (`data/jarvis.db`);
+everything else goes through it. `config.py` holds settings; `permissions.py`
+owns the allow/ask/deny model.
+
 ## Project structure
 
 ```

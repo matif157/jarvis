@@ -17,6 +17,7 @@ All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 - Refreshed the assistant system prompt (removed the stale hard-coded tool list).
 - Added `tests/test_phase16_tools_and_routing.py` (11 offline checks incl. exactly-once execution and confirmation gating).
 - Full regression suite passes (**317 tests across 30 modules**).
+- Post-release hardening: hardened `Assistant.start()` (session now runs under `asyncio.run`, so the event loop is created/closed properly; behavior unchanged) with a regression test; exercised the API server + web UI end-to-end (`/api/health`, `/api/tools`, `/api/chat`, `/`, tool execution) and documented it; added a README "Architecture & naming" section clarifying `tasks.TaskManager` vs `engine_tasks.TaskExecutor`, `memory.Memory` vs `memory_enhanced.EnhancedMemory`, and the router/action-loop/engine layering. Suite now **318 tests**.
 
 ## 2026-10-17 (Phase 15 - Release Readiness / v1.0.0)
 - Promoted the project to its first stable release: **v1.0.0** (bumped in `jarvis/__init__.py` and `setup.py`; the API now reports the package version instead of a hardcoded string).

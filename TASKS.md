@@ -5,12 +5,12 @@ Status keys: NOT STARTED | IN PROGRESS | IMPLEMENTED | TESTED | VERIFIED WORKING
 ## High priority (verification/integration)
 - [x] **Verify live LLM connectivity** (status: VERIFIED WORKING) — Tested with ollama (llama3.2:1b). complete() returned exact expected response "JARVIS_LLM_OK". Evidence in PROVIDER_TEST_RESULTS.md.
 - [x] **Verify Atif integration live** (status: VERIFIED WORKING for health) — Bridge installed as `jarvis atif status|chat|url`; health verified live against a running Atif Assistant on http://127.0.0.1:8770. `atif.ask` roundtrip not user-flow-verified (live ask exceeded the sync timeout), so ask remains unit-tested only.
-- [ ] **Exercise API server + web UI** (status: NOT STARTED) — Dependencies: none. Acceptance: start server briefly, hit /api/health, load web/index.html; stop cleanly. No external calls.
+- [x] **Exercise API server + web UI** (status: VERIFIED WORKING) — Started the server, hit `/api/health` (ok; ollama ready), `/api/tools` (80 tools), `/` (web UI HTML), `POST /api/tools/time.now`, and `POST /api/chat` (LLM reply); stopped cleanly.
 
 ## Medium priority (robustness/docs)
 - [x] **Add pytest runner / test instructions** (status: VERIFIED WORKING) — Phase 15 added a dependency-free `scripts/run_tests.py` runner (`make test`), documented testing in README, and a GitHub Actions CI matrix. `make test-pytest` uses pytest when installed.
-- [ ] **Harden assistant.start() event loop** (status: NOT STARTED) — Dependencies: none. Small refactor (asyncio.run pattern) without changing behavior. Acceptance: existing chat tests still pass; manual chat works.
-- [ ] **Document class naming/API surface** (status: NOT STARTED) — Dependencies: none. Acceptance: README or docs clarify TaskManager vs Tasks, memory vs memory_enhanced, etc.
+- [x] **Harden assistant.start() event loop** (status: VERIFIED WORKING) — Refactored `start()` to run the session via `asyncio.run(self._chat_session())` (loop is created and closed properly, no leak); same prompts/exit words/KeyboardInterrupt+EOF behavior. Added `tests/test_conversation.py::test_start_session_cleanly_terminates`.
+- [x] **Document class naming/API surface** (status: VERIFIED WORKING) — Added an "Architecture & naming" section to `README.md` disambiguating `tasks.TaskManager` (to-dos) vs `engine_tasks.TaskExecutor` (agent plans), `memory.Memory` vs `memory_enhanced.EnhancedMemory`, and the router/action-loop/engine hierarchy.
 
 ## Low priority (enhancements)
 - [ ] **Weather: real API** (status: NOT STARTED) — Dependencies: optional API key/provider. Acceptance: configurable provider with safe fallback to mock; no breaking changes.

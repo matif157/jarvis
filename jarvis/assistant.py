@@ -179,23 +179,28 @@ class Assistant:
         self.is_active = True
         print(self.greet())
         print(f"Mode: {self.mode}. Type 'exit' to quit.\n")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        try:
+            asyncio.run(self._chat_session())
+        except (KeyboardInterrupt, EOFError):
+            print("\nGoodbye!")
+            self.is_active = False
+
+    async def _chat_session(self) -> None:
         while self.is_active:
             try:
                 user_input = input("> ").strip()
-                if not user_input:
-                    continue
-                if user_input.lower() in ("exit", "quit", "bye", "q"):
-                    print("Goodbye!")
-                    self.is_active = False
-                    break
-                response = loop.run_until_complete(self.answer_with_tools(user_input))
-                print(response)
             except (KeyboardInterrupt, EOFError):
                 print("\nGoodbye!")
                 self.is_active = False
                 break
+            if not user_input:
+                continue
+            if user_input.lower() in ("exit", "quit", "bye", "q"):
+                print("Goodbye!")
+                self.is_active = False
+                break
+            response = await self.answer_with_tools(user_input)
+            print(response)
 
     def _get_context_memories(self, query: str) -> list:
         try:
