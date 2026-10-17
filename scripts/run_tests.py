@@ -33,6 +33,14 @@ class _Sentinel:
         return None
 
 
+class Skipped(Exception):
+    """Raised by a test to report it cannot run on this host.
+
+    A module can also define ``SKIP = "reason"`` at module level to skip the
+    whole module (e.g. macOS-only tests running on the Linux CI runner).
+    """
+
+
 def discover(filters):
     modules = sorted(p.stem for p in TESTS_DIR.glob("test_*.py"))
     if filters:
@@ -41,9 +49,18 @@ def discover(filters):
 
 
 def run_module(name):
-    passed = failed = 0
+    passed = failed = skipped = 0
     failures = []
     module = importlib.import_module(f"tests.{name}")
+    skip_reason = getattr(module, "SKIP", None)
+    if skip_reason:
+        return {
+            "passed": 0,
+            "failed": 0,
+            "failures": [],
+            "skipped": 0,
+            "module_skip": str(skip_reason),
+        }
     for func_name, func in inspect.getmembers(module, inspect.isfunction):
         if not func_name.startswith("test_"):
             continue
@@ -53,10 +70,19 @@ def run_module(name):
             except TypeError:
                 func(_Sentinel())
             passed += 1
+        except Skipped as exc:
+            skipped += 1
+            print(f"    skipped {name}.{func_name}: {exc}")
         except Exception:  # noqa: BLE001
             failed += 1
             failures.append((func_name, traceback.format_exc()))
-    return passed, failed, failures
+    return {
+        "passed": passed,
+        "failed": failed,
+        "failures": failures,
+        "skipped": skipped,
+        "module_skip": None,
+    }
 
 
 def main(argv):
@@ -73,22 +99,31 @@ def main(argv):
         print("No test modules matched.")
         return 1
 
-    total_pass = total_fail = 0
+    total_pass = total_fail = total_skip = 0
     start = time.time()
     for name in modules:
-        p, f, failures = run_module(name)
+        result = run_module(name)
+        if result["module_skip"]:
+            print(f"[SKIP] {name}: {result['module_skip']}")
+            total_skip += 1
+            continue
+        p = result["passed"]
+        f = result["failed"]
+        s = result["skipped"]
         total_pass += p
         total_fail += f
+        total_skip += s
         status = "OK" if f == 0 else "FAIL"
-        print(f"[{status}] {name}: {p} passed, {f} failed")
-        for func_name, tb in failures:
+        suffix = f", {s} skipped" if s else ""
+        print(f"[{status}] {name}: {p} passed, {f} failed{suffix}")
+        for func_name, tb in result["failures"]:
             print(f"    FAILED {name}.{func_name}")
-            indented = "\n".join("      " + line for line in tb.strip().splitlines())
+            indented = "\n".join(f"      {line}" for line in tb.strip().splitlines())
             print(indented)
 
     elapsed = time.time() - start
-    print(f"\n{total_pass} passed, {total_fail} failed in {elapsed:.1f}s "
-          f"({len(modules)} modules)")
+    print(f"\n{total_pass} passed, {total_skip} skipped, {total_fail} failed "
+          f"in {elapsed:.1f}s ({len(modules)} modules)")
     return 1 if total_fail else 0
 
 

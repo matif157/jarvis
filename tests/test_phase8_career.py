@@ -213,10 +213,23 @@ def test_resume_list_tool():
 def test_resume_get_tool():
     """Test ResumeGetTool."""
     from jarvis.career import ResumeGetTool
-    
+
+    # Seed our own fixture: this test must not depend on execution order.
+    store = ResumeStore()
+    if store.load("test_2") is None:
+        parser = ResumeParser()
+        store.save(
+            parser.parse(
+                "Jane Smith\njane@example.com\n\nExperience\nDeveloper at Corp"
+                "\nSkills\nPython",
+                resume_id="test_2",
+                filename="jane_resume.txt",
+            )
+        )
+
     tool = ResumeGetTool()
     r = tool.run(resume_id="test_2")
-    
+
     assert r.success
     assert r.result.get("id") == "test_2"
     print("✓ Test 10 PASSED: ResumeGetTool")

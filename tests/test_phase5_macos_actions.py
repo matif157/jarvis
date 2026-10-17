@@ -1,6 +1,8 @@
 """Phase 5 macOS Actions Tests"""
 
 import os
+import platform
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -11,6 +13,12 @@ from jarvis.macos_actions import (
     CreateFileTool,
 )
 from jarvis import assistant
+
+# These tests exercise AppleScript, Safari, Finder and ~/Downloads. They are
+# meaningful on macOS only; the Linux CI runner skips the whole module.
+SKIP = None
+if platform.system() != "Darwin" or shutil.which("osascript") is None:
+    SKIP = "requires macOS (osascript, Safari, Finder, ~/Downloads)"
 
 
 def test_open_allowed_app():
