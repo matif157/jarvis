@@ -3,7 +3,6 @@
 import os
 import sys
 import threading
-import time
 
 _started = False
 _lock = threading.Lock()
@@ -30,14 +29,13 @@ def start(files_dir, host="127.0.0.1", port=8771):
         import uvicorn
         from jarvis.app import app
 
-        # Give the WebView a moment to be ready
         def _run():
             try:
-                uvicorn.run(app, host=host, port=port, log_level="info", access_log=False)
+                uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
             except Exception as e:
                 print("UVICORN_ERROR:", e, file=sys.stderr)
 
-        t = threading.Thread(target=_run, daemon=True)
+        t = threading.Thread(target=_run, daemon=False)
         t.start()
     except Exception as e:
         print("SERVER_START_ERROR:", e, file=sys.stderr)

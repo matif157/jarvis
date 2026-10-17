@@ -5,7 +5,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.WebChromeClient;
-import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -16,7 +15,7 @@ import com.chaquo.python.android.AndroidPlatform;
 public class MainActivity extends Activity {
     private WebView webView;
     private Handler handler;
-    private final int MAX_RETRIES = 20;
+    private final int MAX_RETRIES = 60;
     private int retries = 0;
 
     @Override
@@ -43,23 +42,14 @@ public class MainActivity extends Activity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JarvisAndroid/1.0.1");
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return false;
-            }
-
-            @Override
-            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                retryLoad();
-            }
-
-            @Override
-            public void onReceivedHttpError(WebView view, WebResourceRequest request, android.webkit.WebResourceResponse errorResponse) {
-                retryLoad();
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                view.loadUrl(url);
+                return true;
             }
         });
     }
@@ -73,27 +63,20 @@ public class MainActivity extends Activity {
                 e.printStackTrace();
             }
         });
-        serverThread.setDaemon(true);
         serverThread.start();
     }
 
     private void loadWithRetry() {
-        if (retries >= MAX_RETRIES) {
-            return;
-        }
         handler.postDelayed(() -> {
+            if (retries >= MAX_RETRIES) {
+                return;
+            }
             retries++;
-            webView.loadUrl("http://127.0.0.1:8771/");
-        }, 800 * retries);
-    }
-
-    private void retryLoad() {
-        if (retries < MAX_RETRIES) {
-            handler.postDelayed(() -> {
-                retries++;
-                webView.reload();
-            }, 500 * retries);
-        }
+            if (webView != null) {
+                webView.loadUrl("http://127.0.0.1:8771/");
+            }
+            loadWithRetry();
+        }, 250);
     }
 
     @Override
