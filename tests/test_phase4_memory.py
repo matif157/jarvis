@@ -1,7 +1,7 @@
 """Phase 4 memory tests."""
 
-from jarvis import memory_enhanced, assistant
-import asyncio
+
+from jarvis import assistant, memory_enhanced
 
 
 def test_memory_search_filters():

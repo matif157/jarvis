@@ -1,17 +1,11 @@
 """Phase 8 Resume/Career Tests"""
 
-import os
-import json
-from pathlib import Path
-import tempfile
 
 from jarvis.career import (
+    CareerProfile,
+    CareerProfileStore,
     ResumeParser,
     ResumeStore,
-    CareerProfileStore,
-    Resume,
-    ResumeSection,
-    CareerProfile,
 )
 
 
@@ -40,9 +34,9 @@ Python, JavaScript, React, Docker, AWS, PostgreSQL
 Projects
 Personal Portfolio Website
 - Built with React and Node.js"""
-    
+
     resume = parser.parse(text, resume_id="test_1", filename="resume.txt")
-    
+
     assert resume.id == "test_1"
     assert resume.filename == "resume.txt"
     assert "john.doe@example.com" in resume.contact.get("email", "")
@@ -59,11 +53,11 @@ def test_resume_store_save_load():
     """Test saving and loading resumes."""
     parser = ResumeParser()
     store = ResumeStore()
-    
+
     text = "Jane Smith\njane@example.com\n\nExperience\nDeveloper at Corp\nSkills\nPython, Django"
     resume = parser.parse(text, resume_id="test_2", filename="jane_resume.txt")
     resume_id = store.save(resume)
-    
+
     loaded = store.load(resume_id)
     assert loaded is not None
     assert loaded.id == "test_2"
@@ -87,18 +81,18 @@ def test_resume_delete():
     """Test deleting a resume."""
     store = ResumeStore()
     parser = ResumeParser()
-    
+
     text = "Test User\ntest@example.com\nExperience\nTest role"
     resume = parser.parse(text, resume_id="delete_test", filename="delete_me.txt")
     store.save(resume)
-    
+
     # Verify it exists
     assert store.load("delete_test") is not None
-    
+
     # Delete it
     success = store.delete("delete_test")
     assert success is True
-    
+
     # Verify it's gone
     assert store.load("delete_test") is None
     print("✓ Test 4 PASSED: Resume delete")
@@ -107,19 +101,19 @@ def test_resume_delete():
 def test_resume_search():
     """Test searching resumes by keyword."""
     from jarvis.career import ResumeSearchTool
-    
+
     store = ResumeStore()
     parser = ResumeParser()
-    
+
     # Create a few test resumes
-    r1 = parser.parse("Python Developer\nPython, Django, AWS\nExperience\nBackend dev", 
+    r1 = parser.parse("Python Developer\nPython, Django, AWS\nExperience\nBackend dev",
                        resume_id="search_1", filename="py_dev.txt")
     store.save(r1)
-    
+
     r2 = parser.parse("Frontend Developer\nReact, TypeScript, CSS\nExperience\nFrontend dev",
                      resume_id="search_2", filename="fe_dev.txt")
     store.save(r2)
-    
+
     # Search for Python
     tool = ResumeSearchTool()
     r = tool.run(query="Python")
@@ -134,21 +128,21 @@ def test_career_profile():
     """Test career profile management."""
     career = CareerProfileStore()
     profile = career.load()
-    
+
     # Initially empty
     assert isinstance(profile, CareerProfile)
-    
+
     # Add target role
     career.set_target_role("Senior Backend Engineer")
     profile = career.load()
     assert "Senior Backend Engineer" in profile.target_roles
-    
+
     # Add skill
     career.update_skills(["Kubernetes", "Terraform"])
     profile = career.load()
     assert "Kubernetes" in profile.skills
     assert "Terraform" in profile.skills
-    
+
     # Add note
     profile = career.load()
     profile.notes.append({
@@ -162,33 +156,32 @@ def test_career_profile():
     tool = CareerProfileTool()
     r = tool.run(action="add_note", notes="Test note")
     assert r.success
-    
+
     print("✓ Test 6 PASSED: Career profile management")
 
 
 def test_resume_tools_via_registry():
     """Test that tools are accessible via registry."""
-    from jarvis.tools import get_enhanced_registry
     reg = __import__('jarvis.tools').tools.get_enhanced_registry()
-    
-    resume_tools = ['resume.parse', 'resume.list', 'resume.get', 'resume.delete', 
+
+    resume_tools = ['resume.parse', 'resume.list', 'resume.get', 'resume.delete',
                     'career.profile', 'resume.search']
     names = [t['name'] for t in reg.list_tools()]
-    
+
     for name in resume_tools:
         assert name in names, f"Missing tool: {name}"
-    
+
     print("✓ Test 7 PASSED: All resume tools in registry")
 
 
 def test_resume_parse_tool():
     """Test ResumeParseTool directly."""
     from jarvis.career import ResumeParseTool
-    
+
     tool = ResumeParseTool()
     text = "Test User\ntest@example.com\n\nExperience\nSoftware Engineer at TestCo\nSkills\nPython, JavaScript, React"
     r = tool.run(text=text, filename="test_resume.txt")
-    
+
     assert r.success
     assert r.result.get("resume_id") is not None
     assert r.result.get("skills_found", 0) > 0
@@ -199,10 +192,10 @@ def test_resume_parse_tool():
 def test_resume_list_tool():
     """Test ResumeListTool."""
     from jarvis.career import ResumeListTool
-    
+
     tool = ResumeListTool()
     r = tool.run()
-    
+
     assert r.success
     assert "count" in r.result
     assert "resumes" in r.result
@@ -238,39 +231,39 @@ def test_resume_get_tool():
 def test_career_profile_tool():
     """Test CareerProfileTool."""
     from jarvis.career import CareerProfileTool
-    
+
     tool = CareerProfileTool()
-    
+
     # View
     r = tool.run(action="view")
     assert r.success
     assert "target_roles" in r.result
     assert "skills" in r.result
-    
+
     # Add target role
     r = tool.run(action="add_target_role", target_role="Senior Engineer")
     assert r.success
     assert "Senior Engineer" in r.result.get("target_roles", [])
-    
+
     # Add skill
     r = tool.run(action="add_skill", skill="GraphQL")
     assert r.success
     assert "GraphQL" in r.result.get("skills", [])
-    
+
     # Add note
     r = tool.run(action="add_note", notes="Applied to Company X")
     assert r.success
-    
+
     print("✓ Test 11 PASSED: CareerProfileTool")
 
 
 def test_resume_search_tool():
     """Test ResumeSearchTool."""
     from jarvis.career import ResumeSearchTool
-    
+
     tool = ResumeSearchTool()
     r = tool.run(query="Python")
-    
+
     assert r.success
     assert "query" in r.result
     assert "matches" in r.result
@@ -279,22 +272,22 @@ def test_resume_search_tool():
 
 def test_resume_delete_tool():
     """Test ResumeDeleteTool."""
-    from jarvis.career import ResumeDeleteTool, ResumeStore, ResumeParser
-    
+    from jarvis.career import ResumeDeleteTool, ResumeParser, ResumeStore
+
     parser = ResumeParser()
     store = ResumeStore()
-    
+
     # Create a resume to delete
     text = "Delete Me\nme@test.com\nExperience\nTest role"
     resume = parser.parse(text, resume_id="to_delete", filename="delete.txt")
     store.save(resume)
-    
+
     tool = ResumeDeleteTool()
     r = tool.run(resume_id="to_delete")
-    
+
     assert r.success
     assert r.result.get("deleted") == "to_delete"
-    
+
     # Verify deleted
     assert store.load("to_delete") is None
     print("✓ Test 13 PASSED: ResumeDeleteTool")
@@ -305,16 +298,16 @@ def test_career_profile_with_resumes():
     career = CareerProfileStore()
     store = ResumeStore()
     parser = ResumeParser()
-    
+
     # Parse a resume
     text = "Test User\nuser@test.com\nExperience\nDev at Corp\nSkills\nPython, Go"
     resume = parser.parse(text, resume_id="profile_test_1", filename="profile_test.txt")
     store.save(resume)
-    
+
     # Add to career profile
     career.add_resume(resume.id)
     career.update_skills(resume.skills)
-    
+
     profile = career.load()
     assert resume.id in profile.resume_ids
     assert any("python" in s.lower() or "go" in s.lower() for s in profile.skills)
@@ -324,7 +317,7 @@ def test_career_profile_with_resumes():
 def test_resume_section_extraction():
     """Test section extraction handles various formats."""
     parser = ResumeParser()
-    
+
     # Test with different header styles
     text = """Name
 Email
@@ -340,7 +333,7 @@ BS Degree
 
 SKILLS
 Python, Java"""
-    
+
     resume = parser.parse(text)
     section_titles = [s.title for s in resume.sections]
     assert "Summary" in section_titles

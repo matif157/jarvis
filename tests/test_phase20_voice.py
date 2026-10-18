@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from jarvis import db, engines, llm, service_keys, voice
+from jarvis import db, engines, service_keys, voice
 from jarvis.app import app
 
 GROQ_KEY = "provider.groq.api_key"

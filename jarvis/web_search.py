@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-import json
-import os
-import re
 import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from html import unescape
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
 
 from .logging import get_logger
 

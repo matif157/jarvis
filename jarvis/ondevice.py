@@ -238,11 +238,8 @@ def _free_bytes() -> Optional[int]:
         return None
 
 
-def start_download(model_id: str) -> Dict[str, Any]:
-    e = entry(model_id)
-    if e is None:
-        raise OnDeviceError("unknown model")
-
+def _require_ram(e: Dict[str, Any]) -> None:
+    """Reject models the device cannot hold, unless the caller forces past it."""
     info = device_info()
     if info.get("platform") == "android":
         mem = int(info.get("mem_total_bytes") or 0)
@@ -253,6 +250,14 @@ def start_download(model_id: str) -> Dict[str, Any]:
                 f"{e['label']} needs {e['min_ram_gb']} GB or more - "
                 f"pick a smaller model"
             )
+
+
+def start_download(model_id: str) -> Dict[str, Any]:
+    e = entry(model_id)
+    if e is None:
+        raise OnDeviceError("unknown model")
+
+    _require_ram(e)
 
     with _lock:
         dl = _downloads.get(model_id)
@@ -371,6 +376,126 @@ def cancel_download(model_id: str) -> Dict[str, Any]:
             raise OnDeviceError("no download in progress")
         dl["cancel"] = True
     return {"ok": True, "id": model_id}
+
+
+def begin_import(model_id: str, force: bool = False) -> Path:
+    """Validate an externally downloaded file import and return its part path.
+
+    The file was fetched outside the app (Chrome, file manager), so there is
+    no in-app download to guard - but the same RAM gate, free-space check and
+    duplicate rules apply. ``force=True`` is the user's explicit consent to
+    import on a device below ``min_ram_gb``.
+    """
+    e = entry(model_id)
+    if e is None:
+        raise OnDeviceError("unknown model")
+    if not force:
+        _require_ram(e)
+
+    with _lock:
+        dl = _downloads.get(model_id)
+        if dl and dl.get("state") in ("downloading", "importing"):
+            raise OnDeviceError("already downloading")
+        if installed_size(model_id) is not None:
+            raise OnDeviceError("already installed")
+
+        free = _free_bytes()
+        if free is not None and free < int(e["size"]) + 64 * 1024 * 1024:
+            raise OnDeviceError(
+                f"not enough free space: need about "
+                f"{int(e['size']) // (1024 * 1024) + 64} MB"
+            )
+
+        _downloads[model_id] = {
+            "state": "importing",
+            "done": 0,
+            "total": int(e["size"]),
+            "progress": 0.0,
+            "error": None,
+            "cancel": False,
+            "started_at": time.time(),
+        }
+
+    part = part_path(model_id)
+    try:
+        if part.is_file():
+            part.unlink()
+    except OSError:
+        pass
+    return part
+
+
+def import_progress(model_id: str, done: int) -> None:
+    with _lock:
+        st = _downloads.get(model_id)
+        if st and st.get("state") == "importing":
+            st["done"] = done
+            total = int(st.get("total") or 0)
+            if total:
+                st["progress"] = round(min(100.0, done * 100.0 / total), 1)
+
+
+def finish_import(model_id: str, written: int) -> Dict[str, Any]:
+    """Promote a fully uploaded part file to the installed model."""
+    e = entry(model_id)
+    if e is None:
+        raise OnDeviceError("unknown model")
+    part = part_path(model_id)
+    if written <= 0:
+        raise OnDeviceError("the chosen file was empty")
+    expected = int(e["size"])
+    if written > expected + 64 * 1024 * 1024:
+        raise OnDeviceError(
+            f"file is larger than {e['label']} expects ({expected} bytes) - wrong file?"
+        )
+    if not part.is_file():
+        raise OnDeviceError("the upload did not reach disk")
+
+    final = file_path(model_id)
+    os.replace(part, final)
+    size = final.stat().st_size
+    with _lock:
+        st = _downloads.setdefault(
+            model_id,
+            {"total": expected, "progress": 100.0, "error": None, "started_at": time.time()},
+        )
+        st["state"] = "done"
+        st["progress"] = 100.0
+        st["done"] = size
+        st["verified"] = size == expected
+        st["error"] = (
+            None if size == expected else f"size differs from catalogue ({size} vs {expected} bytes)"
+        )
+    if size == expected and _backend() is not None:
+        try:
+            load(model_id)
+        except OnDeviceError:
+            pass  # load() recorded the reason on the state
+    return {"ok": True, "id": model_id, "bytes": size, "verified": size == expected}
+
+
+def fail_import(model_id: str, message: str) -> None:
+    """Record a failed import and drop the partial upload."""
+    with _lock:
+        st = _downloads.get(model_id)
+        if st is None and entry(model_id) is not None:
+            st = {
+                "done": 0,
+                "total": int(entry(model_id)["size"]),
+                "progress": 0.0,
+                "cancel": False,
+                "started_at": time.time(),
+            }
+            _downloads[model_id] = st
+        if st is not None:
+            st["state"] = "error"
+            st["error"] = message
+    try:
+        p = part_path(model_id)
+        if p.is_file():
+            p.unlink()
+    except OSError:
+        pass
 
 
 def remove(model_id: str) -> Dict[str, Any]:

@@ -2,27 +2,23 @@
 
 from __future__ import annotations
 
-import imaplib
-import smtplib
 import email
 import email.message
 import email.utils
-import re
-import os
+import imaplib
 import json
-import ssl
-from dataclasses import dataclass, field, asdict
+import smtplib
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from email.header import decode_header
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import decode_header
 
 from .config import get_data_dir
 from .logging import get_logger
 from .tools import Tool, ToolResult
-from .permissions import PermissionManager
 
 logger = get_logger(__name__)
 
@@ -300,7 +296,7 @@ class EmailClient:
                 "body_text": body_text[:10000] if body_text else "",
                 "body_html": body_html[:10000] if body_html else None,
                 "attachments": attachments,
-                "is_read": "\Seen" in msg.get("Flags", ""),
+                "is_read": r"\Seen" in msg.get("Flags", ""),
             }
         except Exception as e:
             logger.warning(f"Failed to parse message {uid}: {e}")

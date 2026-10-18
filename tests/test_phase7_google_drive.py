@@ -1,20 +1,16 @@
 """Phase 7 Google Drive Integration Tests"""
 
-import os
-import sys
-from unittest.mock import patch, MagicMock
 
 from jarvis.google_drive import (
-    GoogleDriveAuth,
-    GoogleDriveService,
     DriveConnectTool,
     DriveDisconnectTool,
-    DriveStatusTool,
-    DriveSearchTool,
     DriveGetFileTool,
-    DriveReadFileTool,
     DriveListFolderTool,
-    get_drive_tools,
+    DriveReadFileTool,
+    DriveSearchTool,
+    DriveStatusTool,
+    GoogleDriveAuth,
+    GoogleDriveService,
     drive_connected,
     drive_status,
     get_drive_tools,
@@ -219,10 +215,9 @@ def test_ensure_service_not_connected():
 
 def test_google_drive_tools_registered_in_registry():
     """Test that all Google Drive tools are in the enhanced registry."""
-    from jarvis.tools import get_enhanced_registry
     reg = __import__("jarvis.tools").tools.get_enhanced_registry()
     names = [t["name"] for t in reg.list_tools()]
-    
+
     expected = [
         "drive.connect",
         "drive.disconnect",

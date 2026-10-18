@@ -14,17 +14,15 @@ search) are used only when explicitly configured.
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .config import get_data_dir
 from .logging import get_logger
-from .permissions import PermissionManager
 from .tools import Tool, ToolResult
 
 logger = get_logger(__name__)
@@ -506,7 +504,7 @@ class CoverLetterGenerator:
         skills: List[str] = []
 
         try:
-            from .career import ResumeStore, CareerProfileStore
+            from .career import CareerProfileStore, ResumeStore
 
             if profile is None:
                 profile = CareerProfileStore().load()

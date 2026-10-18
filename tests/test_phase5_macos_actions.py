@@ -3,16 +3,15 @@
 import os
 import platform
 import shutil
-import tempfile
 import uuid
-from pathlib import Path
+
+from jarvis import assistant
 from jarvis.macos_actions import (
+    CreateFileTool,
     OpenAppTool,
     OpenURLTool,
     RevealInFinderTool,
-    CreateFileTool,
 )
-from jarvis import assistant
 
 # These tests exercise AppleScript, Safari, Finder and ~/Downloads. They are
 # meaningful on macOS only; the Linux CI runner skips the whole module.
@@ -136,7 +135,7 @@ def test_reject_overwrite_existing():
     # Create the file first
     with open(test_file, "w") as f:
         f.write("original")
-    
+
     t = CreateFileTool()
     r = t.run(filename="test_overwrite_jarvis.txt", content="new content", directory=download_dir)
     assert not r.success, "Should reject overwrite"
@@ -184,7 +183,7 @@ def test_reject_invalid_urls():
 def test_integration_with_assistant():
     """Journey 15: Natural language requests through assistant."""
     a = assistant.Assistant(mode="auto")
-    
+
     # Test tool selection for app.open
     from jarvis import tools
     reg = tools.get_enhanced_registry()

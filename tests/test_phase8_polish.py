@@ -1,7 +1,8 @@
 """Phase 8 polish tests."""
 
-from jarvis import engine
 import asyncio
+
+from jarvis import engine
 
 
 def test_engine_answer():

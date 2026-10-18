@@ -1,6 +1,7 @@
 """Command registry for Jarvis"""
 
-from typing import Dict, Callable, List
+from typing import Callable, Dict, List
+
 from rich.console import Console
 
 console = Console()
@@ -43,5 +44,4 @@ class CommandRegistry:
         console.print(f"Jarvis v{__version__}")
 
     def _quit(self):
-        from .assistant import Assistant
         console.print("Goodbye!")

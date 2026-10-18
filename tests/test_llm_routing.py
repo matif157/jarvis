@@ -1,9 +1,7 @@
 """Phase 1 — LLM routing tests."""
-import asyncio
-import os
 
-from jarvis import assistant, llm, router
-from jarvis.tools import Tool, ToolResult, ToolRegistry
+from jarvis import assistant
+from jarvis.tools import Tool, ToolRegistry, ToolResult
 
 
 class FakeTool(Tool):

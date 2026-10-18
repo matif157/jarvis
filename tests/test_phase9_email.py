@@ -1,31 +1,26 @@
 """Phase 9 Email/Messaging Tests"""
 
-import os
-import sys
-from unittest.mock import patch, MagicMock
 
 from jarvis.email import (
+    EmailAccountConfig,
     EmailAccountManager,
     EmailClient,
-    EmailAccountConfig,
     EmailConnectTool,
     EmailDisconnectTool,
-    EmailStatusTool,
-    EmailSearchTool,
-    EmailReadTool,
-    EmailSendTool,
     EmailListFoldersTool,
+    EmailReadTool,
+    EmailSearchTool,
+    EmailSendTool,
+    EmailStatusTool,
     get_email_tools,
-    EmailAccountConfig,
 )
 
 
 def test_email_tools_registered():
     """Test that all Email tools are registered."""
-    from jarvis.tools import get_enhanced_registry
     reg = __import__('jarvis.tools').tools.get_enhanced_registry()
     names = [t['name'] for t in reg.list_tools()]
-    
+
     expected = [
         "email.connect",
         "email.disconnect",

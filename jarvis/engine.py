@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from .assistant import Assistant
 from .logging import get_logger
 

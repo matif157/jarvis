@@ -795,11 +795,13 @@ function odCard(m) {
     ? "LOADED"
     : m.state === "downloading"
       ? "DOWNLOADING"
-      : m.state === "error"
-        ? "ERROR"
-        : m.installed
-          ? "INSTALLED"
-          : "NOT DOWNLOADED";
+      : m.state === "importing"
+        ? "IMPORTING"
+        : m.state === "error"
+          ? "ERROR"
+          : m.installed
+            ? "INSTALLED"
+            : "NOT DOWNLOADED";
   head.append(title, badge);
   card.appendChild(head);
 
@@ -808,7 +810,7 @@ function odCard(m) {
   note.textContent = `${fmtBytes(m.size)} - needs ${m.min_ram_gb} GB RAM - ${m.description}`;
   card.appendChild(note);
 
-  if (m.state === "downloading") {
+  if (m.state === "downloading" || m.state === "importing") {
     const bar = document.createElement("div");
     bar.className = "od-bar";
     const fill = document.createElement("div");
@@ -838,8 +840,11 @@ function odCard(m) {
   };
   if (m.state === "downloading") {
     row.appendChild(mk("CANCEL", "cancel"));
+  } else if (m.state === "importing") {
+    // upload in flight - nothing to press until it lands
   } else if (!m.installed) {
     row.appendChild(mk("DOWNLOAD", "download"));
+    row.appendChild(mk("IMPORT FILE", "import"));
     if (m.partial_bytes > 0) row.appendChild(mk("DELETE PARTIAL", "delete"));
   } else {
     if (m.loaded) row.appendChild(mk("UNLOAD", "unload"));
@@ -907,6 +912,11 @@ async function loadOnDevice() {
 }
 
 async function onDeviceAction(action, id) {
+  if (action === "import") {
+    await startImportFile(id);
+    await loadOnDevice();
+    return;
+  }
   if (action === "delete" && !confirm(`Delete ${id}?`)) return;
   ondeviceStatusEl.textContent = `${action.toUpperCase()} ${id}...`;
   try {
@@ -1743,3 +1753,65 @@ loadVoice();
 loadMemory();
 loadWhatsApp();
 loadDeviceControl();
+
+async function startImportFile(id) {
+  const fs = ondeviceData && ondeviceData.device;
+  const models = (ondeviceData && ondeviceData.models) || [];
+  const m = models.find((x) => x.id === id) || null;
+  const info = m || { label: id, min_ram_gb: 1 };
+  let force = false;
+  if (fs && fs.supported && fs.mem_total_bytes) {
+    const need = (info.min_ram_gb || 1) * 1073741824;
+    if (fs.mem_total_bytes < need) {
+      if (
+        !confirm(
+          `This device has ${(fs.mem_total_bytes / 1073741824).toFixed(1)} GB RAM but ${info.label} needs ${info.min_ram_gb} GB+. Import anyway?`
+        )
+      ) {
+        ondeviceStatusEl.textContent = "Import cancelled (insufficient RAM).";
+        return;
+      }
+      force = true;
+    }
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".litertlm";
+  input.style.display = "none";
+  document.body.appendChild(input);
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    document.body.removeChild(input);
+    if (!file) {
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".litertlm")) {
+      ondeviceStatusEl.textContent = "Choose a .litertlm file.";
+      return;
+    }
+    if (m && file.size > m.size + 67108864) {
+      if (
+        !confirm(
+          `Chosen file is much larger than the catalogue size (${fmtBytes(m.size)}). Continue?`
+        )
+      ) {
+        ondeviceStatusEl.textContent = "Import cancelled.";
+        return;
+      }
+    }
+    ondeviceStatusEl.textContent = `Uploading ${file.name}...`;
+    try {
+      const qs = `id=${encodeURIComponent(id)}&filename=${encodeURIComponent(file.name)}&force=${force ? 1 : 0}`;
+      const res = await fetch(`/api/ondevice/import?${qs}`, { method: "POST", body: file });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      ondeviceStatusEl.textContent = "Imported - model is installed. Loading...";
+      await loadOnDevice();
+    } catch (err) {
+      ondeviceStatusEl.textContent = `Failed: ${err.message}`;
+    }
+  };
+  input.click();
+}

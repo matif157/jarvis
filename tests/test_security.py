@@ -4,7 +4,6 @@ from jarvis import security, tools
 
 
 def test_safe_path_allowed():
-    import os
     from pathlib import Path
 
     p = str(Path.home() / "Downloads")

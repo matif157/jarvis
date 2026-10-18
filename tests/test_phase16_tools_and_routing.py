@@ -12,7 +12,7 @@ Covers:
 import asyncio
 import builtins
 
-from jarvis.tools import Tool, ToolResult, ToolRegistry, get_enhanced_registry
+from jarvis.tools import Tool, ToolRegistry, ToolResult, get_enhanced_registry
 
 
 class CounterTool(Tool):

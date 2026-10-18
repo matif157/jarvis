@@ -11,6 +11,14 @@ All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 - Added 5 tests (RAM gate, post-download auto-load, recorded load-failure skip, first-chat auto-load through the router, honest fallback never showing Atif's canned text). Full regression suite passes (**422 tests across 40 modules**).
 - **APK v1.6.1 (versionCode 11)**, arm64-v8a.
 
+## 2026-10-18 (On-device model file import / v1.7.0)
+- **Model import by file:** Added `/api/ondevice/import` that accepts raw `.litertlm` bytes (query: `id`, `filename`, `force=1`), writes to a `.part` file with progress and replaces the final file once verified. No `python-multipart` dependency added.
+- **Import logic in core:** `ondevice.begin_import()` / `import_progress()` / `finish_import()` / `fail_import()` reuse the RAM gate (with `force` override), free-space check, duplicate/cancel rules and auto-load on successful import.
+- **Web UI:** On-device cards show "IMPORT FILE" for not-installed models (and "IMPORTING" during upload). The JS prompts before importing on devices that fall below `min_ram_gb` and offers to `force=1` after explicit confirmation; basic size sanity check included.
+- **Android WebView:** MainActivity adds `WebChromeClient.onShowFileChooser` + `onActivityResult` so Chrome-style file picker opens when tapping IMPORT FILE on the Android app.
+- **Versioning:** Bumped `jarvis/__version__` to 1.7.0, `setup.py` to 1.7.0, Android `versionCode` to 12, `versionName` "1.7.0".
+
+
 
 ## 2026-10-18 (Consent-gated device control / v1.6.0)
 - **Phase 24** - Jarvis can now read the screen and tap, scroll, type or press back/home on Android, through a new AccessibilityService. All four consent layers are required, none are skipped:

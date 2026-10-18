@@ -1,6 +1,6 @@
 """Phase 3 specific tool tests."""
 
-from jarvis import tools, tools_fs
+from jarvis import tools
 
 
 def test_fs_tools_registered():

@@ -1,13 +1,12 @@
 """Phase 4 Memory Control Tests"""
 
-import os
 import jarvis
-from jarvis import db, assistant
+from jarvis import assistant
 from jarvis.tools import (
-    MemoryRememberTool,
-    MemoryRecallTool,
-    MemoryListTool,
     MemoryForgetTool,
+    MemoryListTool,
+    MemoryRecallTool,
+    MemoryRememberTool,
 )
 
 
@@ -104,7 +103,6 @@ def test_delete_memory():
 
 def test_export_memory():
     """Journey 5: Export records and verify that the export contains the expected data."""
-    from jarvis import db
 
     a = assistant.Assistant(mode="basic")
 
@@ -134,8 +132,8 @@ def test_export_memory():
 
 def test_invalid_and_edge_cases():
     """Journeys 6-8: Test edge cases."""
-    from jarvis.tools import MemoryRememberTool, MemoryForgetTool
     from jarvis import assistant
+    from jarvis.tools import MemoryForgetTool, MemoryRememberTool
 
     a = assistant.Assistant(mode="basic")
 
@@ -170,8 +168,8 @@ def test_invalid_and_edge_cases():
 
 def test_no_false_success():
     """Journey 10: Failed write/deletion does not produce false success."""
-    from jarvis.tools import MemoryRememberTool, MemoryForgetTool
     from jarvis import assistant
+    from jarvis.tools import MemoryRememberTool
 
     a = assistant.Assistant(mode="basic")
 

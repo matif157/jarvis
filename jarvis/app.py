@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -480,6 +481,49 @@ async def ondevice_generate(payload: OnDeviceIn) -> JSONResponse:
     except ondevice.OnDeviceError as exc:
         return _ondevice_error(exc)
     return JSONResponse({"ok": True, "text": text, "provider": "on_device"})
+
+
+@app.post("/api/ondevice/import")
+async def ondevice_import(
+    request: Request, id: str = "", filename: str = "", force: int = 0
+) -> JSONResponse:
+    """Install a ``.litertlm`` file the user fetched outside the app.
+
+    The raw file bytes are the request body (no multipart dependency), the
+    catalogue id and filename ride in the query string. ``force=1`` is the
+    user's explicit consent to import on a device below the model's RAM
+    requirement - the one thing the app will not decide for them.
+    """
+    name = (filename or "").strip()
+    if not name.lower().endswith(".litertlm"):
+        return JSONResponse(
+            {"ok": False, "error": "choose a .litertlm model file"}, status_code=400
+        )
+    try:
+        part = await asyncio.to_thread(ondevice.begin_import, id, bool(force))
+    except ondevice.OnDeviceError as exc:
+        return _ondevice_error(exc)
+
+    written = 0
+    try:
+        with open(part, "wb") as fh:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                fh.write(chunk)
+                written += len(chunk)
+                ondevice.import_progress(id, written)
+            fh.flush()
+            os.fsync(fh.fileno())
+        res = await asyncio.to_thread(ondevice.finish_import, id, written)
+    except ondevice.OnDeviceError as exc:
+        await asyncio.to_thread(ondevice.fail_import, id, str(exc))
+        return _ondevice_error(exc)
+    except Exception as exc:  # noqa: BLE001 - disk/client errors become a clean 400
+        message = f"{type(exc).__name__}: {str(exc)[:200]}"
+        await asyncio.to_thread(ondevice.fail_import, id, message)
+        return JSONResponse({"ok": False, "error": message}, status_code=400)
+    return JSONResponse(res)
 
 
 # ---------------------------------------------------------------------------

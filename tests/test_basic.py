@@ -1,11 +1,10 @@
 """Basic tests for Jarvis"""
 
 import re
+import tempfile
 
 from jarvis import __version__
 from jarvis.core import JarvisCore, Note
-import tempfile
-import os
 
 
 def test_version():

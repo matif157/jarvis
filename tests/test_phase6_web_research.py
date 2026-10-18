@@ -1,16 +1,15 @@
 """Phase 6 Web Research Tests"""
 
-import os
-import sys
 from html.parser import HTMLParser
+
 from jarvis.web_search import (
-    SearchResult,
-    SearchResponse,
     MockSearchProvider,
-    SearchManager,
     ResearchPipeline,
-    research,
+    SearchManager,
+    SearchResponse,
+    SearchResult,
     TextExtractor,
+    research,
 )
 
 
@@ -221,7 +220,6 @@ def test_html_parser():
 
 def test_integration_with_assistant():
     """Test that research tools integrate with assistant."""
-    from jarvis import tools
     from jarvis import assistant
 
     a = assistant.Assistant(mode="auto")

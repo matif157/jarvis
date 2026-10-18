@@ -52,6 +52,7 @@ def start(files_dir, host="127.0.0.1", port=8771):
 
     try:
         import uvicorn
+
         from jarvis.app import app
 
         def _run():

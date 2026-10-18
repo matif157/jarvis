@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional
 
 from .config import get_data_dir
 from .logging import get_logger
-from .permissions import PermissionManager
 from .tools import Tool, ToolResult
 
 logger = get_logger(__name__)

@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
-import sys
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .tools import Tool, ToolResult
-
 
 # Application allowlist - only these apps can be opened
 APP_ALLOWLIST = {
@@ -92,7 +88,7 @@ def _open_app(app_name: str) -> ToolResult:
             success=False,
             error=f"Application not in allowlist: {app_name}",
         )
-    
+
     try:
         # Use osascript to launch the application
         script = f'tell application "{resolved_name}" to activate'
@@ -127,7 +123,7 @@ def _open_url(url: str) -> ToolResult:
             success=False,
             error=f"Invalid scheme: {url.split('://')[0].lower() if '://' in url else ''}. Only http/https allowed.",
         )
-    
+
     try:
         # Use osascript to open the URL in the default browser
         script = f'tell application "Finder" to open location "{validated_url}"'
@@ -162,7 +158,7 @@ def _reveal_in_finder(file_path: str) -> ToolResult:
             success=False,
             error=f"Path not in approved directories: {file_path}",
         )
-    
+
     try:
         # Use osascript to reveal the file in Finder
         script = f'tell application "Finder" to reveal POSIX file "{validated_path}"'
@@ -200,14 +196,14 @@ def _create_file(filename: str, content: str, directory: str = None) -> ToolResu
             success=False,
             error=f"Path not in approved directories: {directory}",
         )
-    
+
     # Validate filename - reject traversal sequences
     if ".." in filename or filename.startswith("/"):
         return ToolResult(
             success=False,
             error="Invalid filename: path traversal detected",
         )
-    
+
     # Clean the filename
     safe_filename = os.path.basename(filename)
     if not safe_filename:
@@ -215,9 +211,9 @@ def _create_file(filename: str, content: str, directory: str = None) -> ToolResu
             success=False,
             error="Invalid filename: empty after sanitization",
         )
-    
+
     full_path = os.path.join(validated_dir, safe_filename)
-    
+
     # Check if file already exists
     if os.path.exists(full_path):
         return ToolResult(
@@ -225,18 +221,18 @@ def _create_file(filename: str, content: str, directory: str = None) -> ToolResu
             error=f"File already exists: {full_path}",
             meta={"suggested_action": "Ask user whether to replace or choose another name"},
         )
-    
+
     # Write the file
     try:
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
-        
+
         # Verify the file was created
         if os.path.exists(full_path):
             # Read back the content to verify
             with open(full_path, "r", encoding="utf-8") as f:
                 actual_content = f.read()
-            
+
             return ToolResult(
                 success=True,
                 result={
@@ -262,7 +258,7 @@ class OpenAppTool(Tool):
     name = "app.open"
     description = "Open an approved macOS application"
     permissions = ["app.open"]
-    
+
     def run(self, app_name: str) -> ToolResult:
         return _open_app(app_name)
 
@@ -271,7 +267,7 @@ class OpenURLTool(Tool):
     name = "url.open"
     description = "Open a valid HTTP or HTTPS URL in the browser"
     permissions = ["web.search"]
-    
+
     def run(self, url: str) -> ToolResult:
         return _open_url(url)
 
@@ -281,7 +277,7 @@ class RevealInFinderTool(Tool):
     description = "Reveal a file in Finder"
     permissions = ["file.read"]
     resource_kwarg = "file_path"
-    
+
     def run(self, file_path: str) -> ToolResult:
         return _reveal_in_finder(file_path)
 
@@ -291,6 +287,6 @@ class CreateFileTool(Tool):
     description = "Create a new file in an approved directory"
     permissions = ["file.write"]
     resource_kwarg = "directory"
-    
+
     def run(self, filename: str, content: str = "", directory: str = None) -> ToolResult:
         return _create_file(filename, content, directory)

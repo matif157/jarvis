@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict
 
 
 def classify_intent(text: str) -> Dict[str, str]:

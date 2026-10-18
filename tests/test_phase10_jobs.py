@@ -4,19 +4,19 @@ import tempfile
 from pathlib import Path
 
 from jarvis.jobs import (
-    JobListing,
-    JobSearchQuery,
-    JobApplication,
-    MockJobSource,
-    WebSearchJobSource,
-    JobSearchManager,
-    JobMatcher,
-    JobStore,
-    ApplicationStore,
-    CoverLetterGenerator,
-    ApplicationChecklist,
     ALLOWED_TRANSITIONS,
     APPLICATION_STATUSES,
+    ApplicationChecklist,
+    ApplicationStore,
+    CoverLetterGenerator,
+    JobApplication,
+    JobListing,
+    JobMatcher,
+    JobSearchManager,
+    JobSearchQuery,
+    JobStore,
+    MockJobSource,
+    WebSearchJobSource,
 )
 
 
@@ -351,7 +351,7 @@ def test_job_search_tool_offline():
 
 # 31
 def test_job_save_get_list_tools():
-    from jarvis.jobs import JobSaveTool, JobGetTool, JobListTool
+    from jarvis.jobs import JobGetTool, JobListTool, JobSaveTool
 
     saved = JobSaveTool().run(title="Platform Engineer", company="Acme", url="https://x/1")
     assert saved.success
@@ -381,7 +381,7 @@ def test_job_get_tool_missing():
 
 # 33
 def test_job_match_tool_on_saved_job():
-    from jarvis.jobs import JobSaveTool, JobMatchTool
+    from jarvis.jobs import JobMatchTool, JobSaveTool
 
     saved = JobSaveTool().run(
         title="Senior Engineer", company="Acme", description="python docker aws"
@@ -397,7 +397,7 @@ def test_job_match_tool_on_saved_job():
 
 # 34
 def test_application_add_list_tools():
-    from jarvis.jobs import ApplicationAddTool, ApplicationListTool, ApplicationGetTool, ApplicationDeleteTool
+    from jarvis.jobs import ApplicationAddTool, ApplicationDeleteTool, ApplicationGetTool, ApplicationListTool
 
     added = ApplicationAddTool().run(title="Engineer", company="Acme", notes="via referral")
     assert added.success
@@ -417,7 +417,7 @@ def test_application_add_list_tools():
 
 # 35
 def test_application_update_status_tool():
-    from jarvis.jobs import ApplicationAddTool, ApplicationUpdateStatusTool, ApplicationDeleteTool
+    from jarvis.jobs import ApplicationAddTool, ApplicationDeleteTool, ApplicationUpdateStatusTool
 
     app_id = ApplicationAddTool().run(title="Engineer", company="Acme").result["application_id"]
 
@@ -435,7 +435,7 @@ def test_application_update_status_tool():
 
 # 36
 def test_application_prepare_tool():
-    from jarvis.jobs import JobSaveTool, ApplicationPrepareTool
+    from jarvis.jobs import ApplicationPrepareTool, JobSaveTool
 
     job_id = JobSaveTool().run(title="Data Engineer", company="Globex").result["job_id"]
     r = ApplicationPrepareTool().run(job_id=job_id)
@@ -458,7 +458,7 @@ def test_application_prepare_missing_job():
 
 # 38
 def test_application_followup_draft():
-    from jarvis.jobs import ApplicationAddTool, ApplicationFollowupTool, ApplicationDeleteTool
+    from jarvis.jobs import ApplicationAddTool, ApplicationDeleteTool, ApplicationFollowupTool
 
     app_id = ApplicationAddTool().run(title="Engineer", company="Acme").result["application_id"]
     r = ApplicationFollowupTool().run(application_id=app_id, to="recruiter@acme.com")
@@ -472,7 +472,7 @@ def test_application_followup_draft():
 
 # 39
 def test_application_followup_send_needs_account():
-    from jarvis.jobs import ApplicationAddTool, ApplicationFollowupTool, ApplicationDeleteTool
+    from jarvis.jobs import ApplicationAddTool, ApplicationDeleteTool, ApplicationFollowupTool
 
     app_id = ApplicationAddTool().run(title="Engineer", company="Acme").result["application_id"]
 

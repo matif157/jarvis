@@ -14,8 +14,8 @@ from jarvis.atif_client import (
 from jarvis.iot import (
     Device,
     DeviceStore,
-    HttpDeviceProvider,
     HomeAssistantProvider,
+    HttpDeviceProvider,
     IoTManager,
     MockDeviceProvider,
     get_iot_tools,

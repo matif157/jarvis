@@ -1,6 +1,6 @@
 """Weather tests: pluggable provider with safe mock fallback."""
 
-from jarvis import weather, tools
+from jarvis import tools, weather
 
 
 def test_weather_mock_defaults():

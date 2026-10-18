@@ -11,7 +11,7 @@ break the actual assistant work, so handler errors are swallowed.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 # Event type constants (kept as plain strings so events stay JSON-serialisable).
 EVT_START = "start"

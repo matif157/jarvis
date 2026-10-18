@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,7 +12,6 @@ from typing import Any, Dict, List, Optional
 from .config import get_data_dir
 from .logging import get_logger
 from .tools import Tool, ToolResult
-from .memory import Memory
 
 logger = get_logger(__name__)
 

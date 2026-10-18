@@ -1,6 +1,6 @@
 """Phase 5 planning tests."""
 
-from jarvis import planner, agent
+from jarvis import agent, planner
 
 
 def test_planner_general():

@@ -1,7 +1,7 @@
 """Phase 2 — Action loop tests."""
 
-from jarvis import action_loop, assistant
-from jarvis.tools import Tool, ToolResult, ToolRegistry
+from jarvis import action_loop
+from jarvis.tools import Tool, ToolRegistry, ToolResult
 
 
 class FakeTool(Tool):

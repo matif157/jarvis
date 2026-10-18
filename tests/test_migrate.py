@@ -1,11 +1,10 @@
 """Migration tests."""
 
 import json
-import os
 import tempfile
 from pathlib import Path
 
-from jarvis import migrate, migrate_safe, config
+from jarvis import migrate_safe
 
 
 def test_migrate_creates_counts():

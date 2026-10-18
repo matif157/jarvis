@@ -4,8 +4,11 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -24,6 +27,9 @@ public class MainActivity extends Activity {
     private static final int POLL_INTERVAL_MS = 500;
 
     private static final int MIC_PERMISSION_REQUEST = 1001;
+
+    private static final int FILE_CHOOSER_REQUEST = 1002;
+    private ValueCallback<Uri[]> fileChooserCallback;
 
     private WebView webView;
     private static volatile MainActivity instance;
@@ -94,6 +100,35 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 view.loadUrl(url);
                 return true;
+            }
+        });
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(
+                    WebView webView,
+                    ValueCallback<Uri[]> filePathCallback,
+                    android.webkit.WebChromeClient.FileChooserParams fileChooserParams) {
+                if (fileChooserCallback != null) {
+                    fileChooserCallback.onReceiveValue(null);
+                }
+                fileChooserCallback = filePathCallback;
+
+                Intent intent = fileChooserParams.createIntent();
+                if (intent == null) {
+                    intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                }
+                if (intent.getType() == null) {
+                    intent.setType("*/*");
+                }
+                try {
+                    startActivityForResult(Intent.createChooser(intent, "Choose .litertlm file"), FILE_CHOOSER_REQUEST);
+                    return true;
+                } catch (Exception ignored) {
+                    return false;
+                }
             }
         });
     }
@@ -289,11 +324,16 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_CHOOSER_REQUEST && fileChooserCallback != null) {
+            Uri[] results = null;
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                Uri result = data.getData();
+                results = result != null ? new Uri[]{result} : null;
+            }
+            fileChooserCallback.onReceiveValue(results);
+            fileChooserCallback = null;
         }
     }
 }
