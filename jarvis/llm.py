@@ -226,6 +226,18 @@ async def _on_device_reply(
     except Exception as exc:  # noqa: BLE001
         return None, f"on-device unavailable: {exc}"
     if not ondevice.is_ready():
+        # First chat after a restart: bring up an installed model.
+        try:
+            await asyncio.to_thread(ondevice.auto_load)
+        except Exception:  # noqa: BLE001 - never fail the chat for auto-load
+            pass
+    if not ondevice.is_ready():
+        failed = next(
+            (m for m in ondevice.status() if m.get("installed") and m.get("error")),
+            None,
+        )
+        if failed:
+            return None, f"on-device: {failed['error']}"
         return None, "no on-device model loaded"
     try:
         text = await asyncio.to_thread(ondevice.chat, messages, max_tokens)
@@ -300,6 +312,62 @@ def has_provider() -> bool:
         if provider_key(name):
             return True
     return False
+
+
+def _ondevice_clause() -> str:
+    """One honest clause about the on-device engine's current state."""
+    try:
+        from . import ondevice
+    except Exception:  # noqa: BLE001
+        return "the on-device engine is unavailable"
+    info = ondevice.device_info()
+    if info.get("platform") != "android":
+        return "on-device chat requires the Android app"
+    if ondevice.is_ready():
+        return f"the on-device model {ondevice.loaded_id() or ''} is loaded".strip()
+    failed = next(
+        (m for m in ondevice.status() if m.get("installed") and m.get("error")),
+        None,
+    )
+    if failed:
+        return (
+            f"{failed['label']} is installed but failed to load "
+            f"({failed['error']})"
+        )
+    installed = [m for m in ondevice.status() if m.get("installed")]
+    if installed:
+        return f"{installed[0]['label']} is installed but not loaded"
+    return "no on-device model is downloaded"
+
+
+def chat_unavailable_message(atif_detail: Optional[str] = None) -> str:
+    """One honest paragraph for when nothing could answer the question.
+
+    States Jarvis's own reason first (cloud key / on-device engine), then the
+    actionable fixes, then what Atif reported - never Atif's canned text as if
+    it were Jarvis's diagnosis.
+    """
+    if has_provider():
+        reason = "every configured cloud provider failed"
+    else:
+        reason = "no cloud provider key is set"
+    msg = f"Chat has no model: {reason}; {_ondevice_clause()}."
+    hints = []
+    if not has_provider():
+        hints.append("Set a key in Settings > Service API keys")
+    try:
+        from . import ondevice
+
+        android = ondevice.device_info().get("platform") == "android"
+    except Exception:  # noqa: BLE001
+        android = False
+    if android:
+        hints.append("download and LOAD a model in Settings > On-device")
+    if hints:
+        msg += " " + ", ".join(hints) + "."
+    if atif_detail:
+        msg += f" (Atif: {atif_detail}.)"
+    return msg
 
 
 async def ollama_is_up(url: Optional[str] = None) -> bool:

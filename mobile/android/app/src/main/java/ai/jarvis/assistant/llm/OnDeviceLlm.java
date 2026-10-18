@@ -18,6 +18,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -36,16 +37,15 @@ public final class OnDeviceLlm {
             "You are Jarvis, a concise, helpful personal assistant.";
 
     private static Engine engine;
-    private static Conversation conversation;
     private static String loadedPath;
 
     private OnDeviceLlm() {
     }
 
-    /** True when a model is loaded and its native conversation is alive. */
+    /** True when a model engine is initialised. A conversation is created per generate() call. */
     public static boolean isLoaded() {
         synchronized (LOCK) {
-            return conversation != null && conversation.isAlive();
+            return engine != null;
         }
     }
 
@@ -123,7 +123,7 @@ public final class OnDeviceLlm {
         synchronized (LOCK) {
             Conversation conv = null;
             try {
-                if (engine == null || !isLoaded()) {
+                if (engine == null) {
                     return error("no model loaded");
                 }
                 JSONObject request = new JSONObject(requestJson);
@@ -164,23 +164,23 @@ public final class OnDeviceLlm {
                 ConversationConfig config = new ConversationConfig(
                         Contents.Companion.of(system),          // systemInstruction
                         history,                                // initialMessages
-                        null,                                   // tools
-                        new SamplerConfig(40, 0.95, 0.8, 0),    // topK/topP/temp/seed
+                        Collections.emptyList(),               // tools
+                        new SamplerConfig(40, 0.95, 0.8, 0),    // sampler
                         false,                                  // automaticToolCalling
                         null,                                   // channels
-                        null,                                   // extraContext
+                        Collections.emptyMap(),                // extraContext
                         null,                                   // loraConfig
                         true,                                   // prefillPrefaceOnInit
                         maxTokens,                              // maxOutputToken
                         null,                                   // thinkingConfig
                         false,                                  // enableResponseFormat
-                        null,                                   // speculativeDecoding
+                        null,                                   // enableSpeculativeDecoding
                         null);                                  // chatTemplate
 
                 conv = engine.createConversation(config);
                 Message reply = conv.sendMessage(
                         Message.Companion.user(prompt),
-                        null, null, null, null, maxTokens, null, null);
+                        Collections.emptyMap(), null, null, null, maxTokens, null, null);
                 String text = reply == null ? "" : reply.toString();
                 if (text == null) {
                     text = "";
@@ -205,14 +205,6 @@ public final class OnDeviceLlm {
     }
 
     private static void unloadLocked() {
-        if (conversation != null) {
-            try {
-                conversation.close();
-            } catch (Throwable ignored) {
-                // release is best effort
-            }
-            conversation = null;
-        }
         if (engine != null) {
             try {
                 engine.close();

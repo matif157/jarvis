@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-18 (On-device chat actually works after download / v1.6.1)
+- **Root-cause fix (Java)**: `llm/OnDeviceLlm.isLoaded()` checked a static `conversation` field that was never assigned (only per-call local conversations exist), so it could never return true - the bridge rejected every `generate()` with "no model loaded" even after a successful LOAD. Readiness is now engine-based (`engine != null`); the dead `conversation` field is gone.
+- **Downloads are gated on device RAM**: `start_download()` compares the catalogue's `min_ram_gb` with the device's real memory (Android only) and refuses with an actionable message ("this device has 3.9 GB RAM but Gemma 4 E2B needs 8 GB or more - pick a smaller model") - the exact trap that let an 8 GB model land on a 4 GB emulator.
+- **Auto-load**: a finished, size-verified download loads itself into the engine immediately, and the first chat after a restart auto-loads an installed model too (router-level, engine mode auto/on_device only). `load()` failures are recorded on the model's state (`load failed: ...` shown on the card) and are not retried in the same session; a later explicit LOAD or re-download retries them. `llm._on_device_reply` surfaces the recorded load error instead of a bare "no on-device model loaded".
+- **Honest fallback**: `llm.chat_unavailable_message()` states Jarvis's own reason (cloud key missing/failed + the on-device engine's real state) with the actionable fix, and only then what Atif reported. `Assistant.atif_respond` treats an Atif reply with `provider: "offline"` as *not an answer*, so Atif's canned "Set GROQ_API_KEY ... Atif Assistant cannot think right now" text is never passed off as Jarvis's diagnosis - the previous behaviour when a downloaded model silently failed to answer.
+- **Settings UI**: the Setup status checklist now says "X is downloaded but not loaded - press LOAD below." when a model is installed but the engine is not ready.
+- Added 5 tests (RAM gate, post-download auto-load, recorded load-failure skip, first-chat auto-load through the router, honest fallback never showing Atif's canned text). Full regression suite passes (**422 tests across 40 modules**).
+- **APK v1.6.1 (versionCode 11)**, arm64-v8a.
+
+
 ## 2026-10-18 (Consent-gated device control / v1.6.0)
 - **Phase 24** - Jarvis can now read the screen and tap, scroll, type or press back/home on Android, through a new AccessibilityService. All four consent layers are required, none are skipped:
   1. **In-app master toggle** (`device.enabled`, default off) - Settings > Device control.

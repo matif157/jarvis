@@ -354,3 +354,131 @@ def test_settings_ui_ships_ondevice_manager():
     css = Path("web/style.css").read_text(encoding="utf-8")
     assert ".od-card" in css and ".od-fill" in css
     print("✓ Test 8 PASSED: Settings UI ships the on-device model manager")
+
+
+# 9
+def test_ram_gate_rejects_model_bigger_than_device():
+    entry, teardown = make_env(0, url="http://127.0.0.1:9/unreachable")
+    fake = FakeBackend()  # reports a 4 GB android device
+    try:
+        ondevice.set_backend(fake)
+        entry["min_ram_gb"] = 8
+        try:
+            ondevice.start_download(TEST_ID)
+        except ondevice.OnDeviceError as exc:
+            msg = str(exc)
+            assert "RAM" in msg and "8 GB" in msg and "pick a smaller model" in msg, msg
+        else:
+            raise AssertionError("RAM gate did not reject the download")
+        assert ondevice.installed_size(TEST_ID) is None
+    finally:
+        teardown()
+    print("✓ Test 9 PASSED: downloads are gated on the device's RAM")
+
+
+# 10
+def test_download_auto_loads_for_chat():
+    srv, port = serve()
+    entry, teardown = make_env(port)
+    fake = FakeBackend()
+    try:
+        ondevice.set_backend(fake)
+        ondevice.start_download(TEST_ID)
+        assert wait_until(lambda: state_of(TEST_ID)["installed"], timeout=20)
+        assert wait_until(lambda: ondevice.is_ready(), timeout=10), state_of(TEST_ID)
+        assert ondevice.loaded_id() == TEST_ID
+        assert state_of(TEST_ID)["loaded"] is True
+        assert not state_of(TEST_ID)["error"]
+    finally:
+        teardown()
+        srv.shutdown()
+    print("✓ Test 10 PASSED: a finished download auto-loads and is ready for chat")
+
+
+# 11
+def test_failed_auto_load_is_recorded_and_not_retried():
+    srv, port = serve()
+    entry, teardown = make_env(port)
+
+    class _FailLoad(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.load_attempts = 0
+
+        def load(self, path):
+            self.load_attempts += 1
+            return {"ok": False, "error": "out of memory"}
+
+    fake = _FailLoad()
+    try:
+        ondevice.set_backend(fake)
+        ondevice.start_download(TEST_ID)
+        assert wait_until(lambda: state_of(TEST_ID)["installed"], timeout=20)
+        assert wait_until(
+            lambda: "load failed" in (state_of(TEST_ID)["error"] or ""), timeout=10
+        ), state_of(TEST_ID)
+        assert not ondevice.is_ready()
+        assert "out of memory" in state_of(TEST_ID)["error"]
+        assert ondevice.auto_load() is None
+        assert fake.load_attempts == 1, "failed model was retried in the same session"
+    finally:
+        teardown()
+        srv.shutdown()
+    print("✓ Test 11 PASSED: load failures are recorded and not retried in-session")
+
+
+# 12
+def test_first_chat_auto_loads_installed_model():
+    srv, port = serve()
+    entry, teardown = make_env(port)
+    restore = guard_settings("engine.llm")
+    fake = FakeBackend()
+    try:
+        ondevice.start_download(TEST_ID)  # no bridge yet: stages the file only
+        assert wait_until(lambda: state_of(TEST_ID)["installed"], timeout=20)
+        ondevice.set_backend(fake)
+        engines.set("llm", "on_device")
+        assert not ondevice.is_ready()
+        assert asyncio.run(llm.active_provider()) is None
+
+        from jarvis.router import Router
+
+        dec = asyncio.run(Router().route("hello"))
+        assert dec["kind"] == "chat", dec
+        assert dec["provider"] == "on_device"
+        assert fake.loaded and ondevice.is_ready()
+    finally:
+        restore()
+        teardown()
+        srv.shutdown()
+    print("✓ Test 12 PASSED: the first chat auto-loads the downloaded model")
+
+
+# 13
+def test_honest_fallback_when_nothing_can_answer():
+    from unittest import mock
+
+    from jarvis import assistant, atif_client
+
+    async def _ask(question, session=None, url=None, timeout=120.0):
+        return {
+            "ok": True,
+            "data": {"text": "[UNKNOWN] canned Atif fallback", "provider": "offline"},
+        }
+
+    async def _no_active():
+        return None
+
+    ondevice.clear_backend()
+    with mock.patch.object(atif_client, "ask", _ask), mock.patch.object(
+        llm, "active_provider", _no_active
+    ), mock.patch.object(llm, "has_provider", lambda: False):
+        a = assistant.Assistant(mode="auto")
+        text, provider, _tool = asyncio.run(a.respond("hello"))
+    assert provider == "basic", provider
+    assert "Chat has no model:" in text
+    assert "no cloud provider key is set" in text
+    assert "on-device chat requires the Android app" in text
+    assert "(Atif: Atif has no model provider configured.)" in text
+    assert "[UNKNOWN]" not in text, "Atif's canned text passed off as the answer"
+    print("✓ Test 13 PASSED: fallback states Jarvis's own diagnosis, not Atif's")

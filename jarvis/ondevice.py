@@ -18,7 +18,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -60,6 +60,7 @@ CATALOG: List[Dict[str, Any]] = [
 _lock = threading.Lock()
 _downloads: Dict[str, Dict[str, Any]] = {}
 _loaded_id: Optional[str] = None
+_load_failed: set = set()
 _backend_override: Optional[Any] = None
 _bridge_cache: Any = None
 _bridge_probed = False
@@ -242,6 +243,17 @@ def start_download(model_id: str) -> Dict[str, Any]:
     if e is None:
         raise OnDeviceError("unknown model")
 
+    info = device_info()
+    if info.get("platform") == "android":
+        mem = int(info.get("mem_total_bytes") or 0)
+        need = int(e["min_ram_gb"]) * 1024**3
+        if mem and mem < need:
+            raise OnDeviceError(
+                f"this device has {mem / 1024**3:.1f} GB RAM but "
+                f"{e['label']} needs {e['min_ram_gb']} GB or more - "
+                f"pick a smaller model"
+            )
+
     with _lock:
         dl = _downloads.get(model_id)
         if dl and dl.get("state") == "downloading":
@@ -327,6 +339,11 @@ def _download_worker(e: Dict[str, Any], state: Dict[str, Any]) -> None:
             state["verified"] = size == expected
             if size != expected:
                 state["error"] = f"size differs from catalogue ({size} vs {expected} bytes)"
+        if size == expected and _backend() is not None:
+            try:
+                load(model_id)
+            except OnDeviceError:
+                pass  # load() recorded the reason on the download state
     except OnDeviceError as exc:
         cancelled = str(exc) == "cancelled"
         with _lock:
@@ -376,6 +393,7 @@ def remove(model_id: str) -> Dict[str, Any]:
         _downloads.pop(model_id, None)
         if _loaded_id == model_id:
             _loaded_id = None
+    _load_failed.discard(model_id)
     return {"ok": True, "id": model_id, "removed": removed}
 
 
@@ -391,9 +409,43 @@ def load(model_id: str) -> Dict[str, Any]:
     global _loaded_id
     result = _as_dict(b.load(str(file_path(model_id))))
     if not result.get("ok"):
-        raise OnDeviceError(str(result.get("error") or "failed to load model"))
+        msg = str(result.get("error") or "failed to load model")
+        _load_failed.add(model_id)
+        with _lock:
+            dl = _downloads.get(model_id)
+            if dl is not None:
+                dl["error"] = f"load failed: {msg}"
+        raise OnDeviceError(msg)
     _loaded_id = model_id
+    _load_failed.discard(model_id)
+    with _lock:
+        dl = _downloads.get(model_id)
+        if dl is not None:
+            dl["error"] = None
     return {"ok": True, "id": model_id, "detail": result}
+
+
+def auto_load() -> Optional[str]:
+    """Load an installed model when the engine is here and nothing is loaded.
+
+    Runs after a download finishes and on the first chat after an app restart,
+    so a downloaded model actually answers without an extra button press.
+    Models that already failed to load this session are skipped; returns the
+    loaded id, or None when there was nothing to load.
+    """
+    if is_ready():
+        return _loaded_id
+    if _backend() is None:
+        return None
+    for e in CATALOG:
+        if installed_size(e["id"]) is None or e["id"] in _load_failed:
+            continue
+        try:
+            load(e["id"])
+        except OnDeviceError:
+            continue
+        return e["id"]
+    return None
 
 
 def unload() -> Dict[str, Any]:
@@ -437,3 +489,4 @@ def reset_state() -> None:
     with _lock:
         _downloads.clear()
     _loaded_id = None
+    _load_failed.clear()

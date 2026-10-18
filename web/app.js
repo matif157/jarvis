@@ -614,15 +614,18 @@ function renderSetup() {
   if (od) {
     const supported = !!(od.device && od.device.supported);
     const forced = od.engine_mode === "on_device";
+    const installed = (od.models || []).find((m) => m.installed);
     if (supported || forced) {
       setupItem(
         !!od.ready,
         "Offline chat (on-device)",
         od.ready
           ? `${od.loaded} loaded - private, offline answers`
-          : forced
-            ? "Engine is on-device but no model is loaded - download one below."
-            : "Optional: download a model below for private offline chat.",
+          : installed
+            ? `${installed.label} is downloaded but not loaded - press LOAD below.`
+            : forced
+              ? "Engine is on-device but no model is loaded - download one below."
+              : "Optional: download a model below for private offline chat.",
         "#ondevice"
       );
     }

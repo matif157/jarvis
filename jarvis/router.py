@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional
@@ -76,6 +77,17 @@ class Router:
 
     async def route(self, query: str, history: Optional[List[dict]] = None, context: Optional[List[dict]] = None, provider: Optional[str] = None) -> Dict[str, Any]:
         active = provider or await self.llm.active_provider()
+        if not active:
+            # A downloaded model that is not loaded yet: first chat loads it.
+            try:
+                from . import engines, ondevice
+
+                if engines.get("llm") in ("auto", "on_device") and await asyncio.to_thread(
+                    ondevice.auto_load
+                ):
+                    active = await self.llm.active_provider()
+            except Exception:  # noqa: BLE001 - routing must never break on this
+                active = None
         if not active:
             return {"kind": "basic", "provider": None}
         messages = self._messages(query, history=history, context=context)

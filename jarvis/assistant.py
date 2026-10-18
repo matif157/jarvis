@@ -9,7 +9,6 @@ from typing import Optional
 from . import atif_client, db, events, llm
 from .action_loop import ActionLoop
 from .router import Router
-from .tools import get_default_registry
 
 SYSTEM_PROMPT = (
     "You are Jarvis, a concise, local-first personal assistant. "
@@ -86,10 +85,19 @@ class Assistant:
             return None, f"error: {exc}"
 
     async def atif_respond(self, query: str) -> tuple:
+        """Ask Atif. Returns (text, error): text is None when Atif cannot answer.
+
+        Atif answering with its own "no provider" fallback counts as not
+        answering - the user would otherwise see Atif's canned text as if it
+        were Jarvis's diagnosis.
+        """
         result = await atif_client.ask(query, session=self.session)
-        if result.get("ok"):
-            return result["data"].get("text", ""), "atif"
-        return None, result.get("error", "atif unreachable")
+        if not result.get("ok"):
+            return None, result.get("error", "atif unreachable")
+        data = result.get("data") or {}
+        if str(data.get("provider") or "").lower() == "offline":
+            return None, "Atif has no model provider configured"
+        return str(data.get("text") or ""), None
 
     async def answer(self, query: str) -> str:
         text, _provider, _tool = await self.respond(query)
@@ -129,18 +137,22 @@ class Assistant:
                     text = loop_res["text"]
                     tool = loop_res.get("steps")[-1]["tool"] if loop_res.get("steps") else None
                     return await _finish(text, loop_res.get("provider") or "llm", tool)
-                res = await self.atif_respond(query)
-                if res[0]:
-                    return await _finish(res[0], "atif", None)
-                text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
-                return await _finish(text, "basic", None)
+                text, atif_err = await self.atif_respond(query)
+                if text:
+                    return await _finish(text, "atif", None)
+                msg = llm.chat_unavailable_message(atif_err)
+                return await _finish(
+                    f"{msg}\n\n{self.basic_respond(query)}", "basic", None
+                )
 
             if self.mode == "atif":
-                res = await self.atif_respond(query)
-                if res[0]:
-                    return await _finish(res[0], "atif", None)
-                text = f"Atif unreachable ({res[1]}). Falling back...\n\n{self.basic_respond(query)}"
-                return await _finish(text, "basic", None)
+                text, atif_err = await self.atif_respond(query)
+                if text:
+                    return await _finish(text, "atif", None)
+                msg = llm.chat_unavailable_message(atif_err)
+                return await _finish(
+                    f"{msg}\n\n{self.basic_respond(query)}", "basic", None
+                )
 
             if self.mode in ("auto", "llm"):
                 ctx = self._get_context_memories(query)
