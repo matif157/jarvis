@@ -26,6 +26,7 @@ from . import (
     memory_ingest,
     ondevice,
     service_keys,
+    sync,
     voice,
     whatsapp,
 )
@@ -33,6 +34,10 @@ from .config import HOST, PORT, PROVIDER_LABELS, PROVIDER_ORDER, get_web_dir
 from .tools import get_enhanced_registry
 
 app = FastAPI(title="Jarvis", version=__version__)
+
+# An external model import must keep the bytes flowing; a browser that dies
+# mid-upload must not leave the card stuck on "IMPORTING" forever.
+STALL_SECONDS = 120.0
 
 # Prefixes whose values are never accepted by (or returned from) /api/settings:
 # provider.* -> handled by /api/providers, secret.* -> /api/keys,
@@ -172,6 +177,8 @@ class DeviceActionIn(BaseModel):
 @app.on_event("startup")
 def _startup() -> None:
     db.init_db()
+    sync.start_auto()
+    sync.start_listener()
 
 
 @app.get("/api/health")
@@ -505,14 +512,25 @@ async def ondevice_import(
         return _ondevice_error(exc)
 
     written = 0
+    stream = request.stream()
     try:
         with open(part, "wb") as fh:
-            async for chunk in request.stream():
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(stream.__anext__(), timeout=STALL_SECONDS)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    raise ondevice.OnDeviceError(
+                        f"upload stalled - no data for {STALL_SECONDS}s"
+                    )
                 if not chunk:
                     continue
                 fh.write(chunk)
                 written += len(chunk)
                 ondevice.import_progress(id, written)
+                if await request.is_disconnected():
+                    raise ondevice.OnDeviceError("upload interrupted by the browser")
             fh.flush()
             os.fsync(fh.fileno())
         res = await asyncio.to_thread(ondevice.finish_import, id, written)
@@ -1021,6 +1039,109 @@ async def test_one_provider(name: str, payload: ProviderIn) -> JSONResponse:
         url=payload.url,
     )
     return JSONResponse(result)
+
+
+# --------------------------------------------------------------------------- #
+# Cross-surface sync (Phase 25)
+# --------------------------------------------------------------------------- #
+class SyncIn(BaseModel):
+    enabled: Optional[bool] = None
+    device_name: Optional[str] = None
+    interval: Optional[int] = None
+    port: Optional[int] = None
+    token: Optional[str] = None
+    peers: Optional[list] = None
+    github_repo: Optional[str] = None
+    github_token: Optional[str] = None
+    github_path: Optional[str] = None
+    github_branch: Optional[str] = None
+
+
+class SyncApply(BaseModel):
+    entries: list = Field(default_factory=list)
+    device: Optional[str] = None
+
+
+def _sync_authorized(request: Request) -> bool:
+    """Peers must present our shared token when one is configured."""
+    expected = db.get_setting("sync.token", "")
+    if not expected:
+        return True
+    provided = request.headers.get("X-Jarvis-Sync") or request.query_params.get("token", "")
+    return provided == expected
+
+
+@app.get("/api/sync/status")
+def sync_status() -> dict:
+    return {"ok": True, **sync.status()}
+
+
+@app.post("/api/sync/settings")
+def sync_settings(payload: SyncIn) -> JSONResponse:
+    """Update sync config; secrets are stored but never echoed back."""
+    values = payload.model_dump(exclude_none=True)
+    if values.get("enabled"):
+        sync.ensure_token()
+    return JSONResponse({"ok": True, "config": sync.set_config(values), "status": sync.status()})
+
+
+@app.post("/api/sync/token")
+def sync_token(action: str = "get") -> JSONResponse:
+    """Reveal (or rotate) this device's shared token so it can be shared once."""
+    if action == "rotate":
+        db.set_setting("sync.token", "")
+    return JSONResponse({"ok": True, "token": sync.ensure_token()})
+
+
+@app.post("/api/sync/now")
+def sync_now() -> JSONResponse:
+    return JSONResponse({"ok": True, **sync.sync_all()})
+
+
+@app.get("/api/sync/changes")
+def sync_changes(request: Request, since: int = 0, limit: int = 2000) -> JSONResponse:
+    """Peer pull endpoint: everything in this device's journal past ``since``."""
+    if not _sync_authorized(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    entries, cursor = sync.changes_since(since, limit=limit)
+    return JSONResponse(
+        {
+            "ok": True,
+            "device": sync.device_id(),
+            "device_name": sync.device_name(),
+            "entries": entries,
+            "cursor": cursor,
+        }
+    )
+
+
+@app.post("/api/sync/apply")
+def sync_apply(request: Request, payload: SyncApply) -> JSONResponse:
+    """Peer push endpoint: replay their journal lines here."""
+    if not _sync_authorized(request):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    summary = sync.apply_entries(payload.entries)
+    return JSONResponse({"ok": True, **summary})
+
+
+@app.get("/api/sync/export")
+def sync_export() -> JSONResponse:
+    """Full snapshot (every syncable row) for manual backup."""
+    return JSONResponse(sync.build_snapshot())
+
+
+@app.post("/api/sync/import")
+def sync_import(snapshot: Dict[str, Any]) -> JSONResponse:
+    return JSONResponse({"ok": True, **sync.import_snapshot(snapshot)})
+
+
+@app.post("/api/sync/github/{action}")
+def sync_github(action: str) -> JSONResponse:
+    if action == "push":
+        return JSONResponse(sync.github_push())
+    if action == "pull":
+        return JSONResponse(sync.github_pull())
+    return JSONResponse({"ok": False, "error": "unknown action"}, status_code=404)
 
 
 WEB_DIR = Path(get_web_dir())

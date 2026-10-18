@@ -482,3 +482,93 @@ def test_honest_fallback_when_nothing_can_answer():
     assert "(Atif: Atif has no model provider configured.)" in text
     assert "[UNKNOWN]" not in text, "Atif's canned text passed off as the answer"
     print("✓ Test 13 PASSED: fallback states Jarvis's own diagnosis, not Atif's")
+
+
+# 14
+def test_import_external_model_file():
+    srv, port = serve()
+    entry, teardown = make_env(port)
+    try:
+        c = client()
+        # a browser file with the wrong extension is refused up front
+        r = c.post(
+            f"/api/ondevice/import?id={TEST_ID}&filename=notes.txt",
+            content=b"just some notes",
+        )
+        assert r.status_code == 400, r.text
+        assert ".litertlm" in r.json()["error"]
+        assert ondevice.installed_size(TEST_ID) is None
+
+        # unknown catalogue id
+        r = c.post("/api/ondevice/import?id=nope&filename=a.litertlm", content=b"x")
+        assert r.status_code == 404
+
+        # the right-size file installs and verifies
+        r = c.post(
+            f"/api/ondevice/import?id={TEST_ID}&filename=tiny.litertlm", content=PAYLOAD
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["ok"] and data["bytes"] == len(PAYLOAD) and data["verified"]
+        assert ondevice.installed_size(TEST_ID) == len(PAYLOAD)
+        assert not ondevice.part_path(TEST_ID).exists()
+        st = state_of(TEST_ID)
+        assert st["installed"] and st["error"] is None, st
+
+        # a second import is refused while the model is installed
+        r = c.post(f"/api/ondevice/import?id={TEST_ID}&filename=tiny.litertlm", content=PAYLOAD)
+        assert r.status_code == 409
+
+        # the wrong file size still installs, but says so honestly
+        ondevice.remove(TEST_ID)
+        r = c.post(f"/api/ondevice/import?id={TEST_ID}&filename=tiny.litertlm", content=b"x" * 10)
+        assert r.status_code == 200
+        assert r.json()["verified"] is False
+        assert "size differs" in (state_of(TEST_ID)["error"] or "")
+
+        # a wildly oversized file is rejected and its partial upload cleaned up
+        ondevice.remove(TEST_ID)
+        r = c.post(
+            f"/api/ondevice/import?id={TEST_ID}&filename=tiny.litertlm",
+            content=b"x" * (len(PAYLOAD) + 65 * 1024 * 1024),
+        )
+        assert r.status_code == 400
+        assert "larger than" in r.json()["error"]
+        assert not ondevice.part_path(TEST_ID).exists()
+        assert ondevice.installed_size(TEST_ID) is None
+
+        # a non-.litertlm filename is refused before anything is written
+        r = c.post(f"/api/ondevice/import?id={TEST_ID}&filename=model.bin", content=PAYLOAD)
+        assert r.status_code == 400
+        assert ondevice.installed_size(TEST_ID) is None
+    finally:
+        teardown()
+        srv.shutdown()
+    print("✓ Test 14 PASSED: externally downloaded .litertlm files can be imported")
+
+
+# 15
+def test_import_respects_ram_gate_with_force_override():
+    srv, port = serve()
+    entry, teardown = make_env(port)
+    entry["min_ram_gb"] = 16  # bigger than the fake device's 4 GB
+    try:
+        ondevice.set_backend(FakeBackend())
+        c = client()
+        r = c.post(f"/api/ondevice/import?id={TEST_ID}&filename=tiny.litertlm", content=PAYLOAD)
+        assert r.status_code == 400, r.text
+        assert "RAM" in r.json()["error"]
+        assert ondevice.installed_size(TEST_ID) is None
+
+        # the user forcing through is explicit consent, and it installs
+        r = c.post(
+            f"/api/ondevice/import?id={TEST_ID}&filename=tiny.litertlm&force=1",
+            content=PAYLOAD,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["verified"] is True
+        assert ondevice.installed_size(TEST_ID) == len(PAYLOAD)
+    finally:
+        teardown()
+        srv.shutdown()
+    print("✓ Test 15 PASSED: import honours the RAM gate unless the user forces it")

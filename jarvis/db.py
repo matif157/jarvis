@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -32,6 +33,45 @@ def init_db() -> None:
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
+    _migrate_sync()
+
+
+def _migrate_sync() -> None:
+    """Give every message a stable global id so chats can sync across devices."""
+    try:
+        conn = connect()
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        if "msg_id" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN msg_id TEXT")
+        rows = conn.execute("SELECT id FROM messages WHERE msg_id IS NULL").fetchall()
+        for r in rows:
+            conn.execute(
+                "UPDATE messages SET msg_id=? WHERE id=?", (uuid.uuid4().hex, r["id"])
+            )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_msg_id ON messages(msg_id)"
+        )
+        conn.commit()
+        conn.close()
+    except Exception:  # noqa: BLE001 - sync ids are best-effort, never fatal
+        pass
+
+
+def _journal(entity: str, entity_id: str, op: str, payload: Optional[Dict[str, Any]] = None) -> None:
+    """Append a change to the sync journal (never fatal, never recursive).
+
+    Imported lazily: :mod:`jarvis.sync` imports this module, so a top-level
+    import here would be circular. Keys under ``secret.`` and ``sync.`` are the
+    device's own and are deliberately not journalled.
+    """
+    if entity == "settings" and entity_id.startswith(("secret.", "sync.")):
+        return
+    try:
+        from . import sync
+
+        sync.record(entity, entity_id, op, payload)
+    except Exception:  # noqa: BLE001 - journalling must not break a write
+        pass
 
 
 SCHEMA = """
@@ -126,18 +166,46 @@ CREATE TABLE IF NOT EXISTS device_audit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_audit_ts ON device_audit(ts);
+
+-- Cross-surface sync (Phase 25): an append-only journal of every change to a
+-- syncable table. Devices exchange journal entries; deletes travel as tombstones
+-- (op='delete'), so removals propagate instead of resurrecting on the next pull.
+CREATE TABLE IF NOT EXISTS sync_journal (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    ts TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_journal_seq ON sync_journal(seq);
+CREATE INDEX IF NOT EXISTS idx_sync_journal_entity ON sync_journal(entity, entity_id);
+
+-- Last write seen for an entity, per the (ts, device_id) order used to resolve
+-- conflicts deterministically across devices (last-write-wins with a tiebreak).
+CREATE TABLE IF NOT EXISTS sync_seen (
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    PRIMARY KEY (entity, entity_id)
+);
 """
 
 
 def set_setting(key: str, value: str) -> None:
     """Set a setting in database."""
     conn = connect()
+    ts = now()
     conn.execute(
         "INSERT OR REPLACE INTO settings(key, value, updated_at) VALUES (?,?,?)",
-        (key, value, now()),
+        (key, value, ts),
     )
     conn.commit()
     conn.close()
+    _journal("settings", key, "upsert", {"key": key, "value": value, "updated_at": ts})
 
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -156,6 +224,7 @@ def delete_setting(key: str) -> None:
     conn.execute("DELETE FROM settings WHERE key=?", (key,))
     conn.commit()
     conn.close()
+    _journal("settings", key, "delete", None)
 
 
 # Notes
@@ -171,6 +240,12 @@ def add_note_db(note_id: str, content: str, tags: List[str] = None, created_at: 
     )
     conn.commit()
     conn.close()
+    _journal(
+        "notes",
+        note_id,
+        "upsert",
+        {"note_id": note_id, "content": content, "tags": json.dumps(tags), "created_at": created_at},
+    )
 
 
 def get_notes_db() -> List[Dict[str, Any]]:
@@ -202,6 +277,20 @@ def add_task_db(task_id: str, title: str, description: str = "", status: str = "
     )
     conn.commit()
     conn.close()
+    _journal(
+        "tasks",
+        task_id,
+        "upsert",
+        {
+            "task_id": task_id,
+            "title": title,
+            "description": description,
+            "status": status,
+            "priority": priority,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        },
+    )
 
 
 def get_tasks_db() -> List[Dict[str, Any]]:
@@ -224,12 +313,17 @@ def get_tasks_db() -> List[Dict[str, Any]]:
 
 def complete_task_db(task_id: str) -> bool:
     conn = connect()
+    ts = now()
     cur = conn.execute(
         "UPDATE tasks SET status='completed', updated_at=? WHERE task_id=?",
-        (now(), task_id),
+        (ts, task_id),
     )
     conn.commit()
     rows = cur.rowcount
+    if rows > 0:
+        row = conn.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+        if row:
+            _journal("tasks", task_id, "upsert", {k: row[k] for k in row.keys()})
     conn.close()
     return rows > 0
 
@@ -237,12 +331,15 @@ def complete_task_db(task_id: str) -> bool:
 # Memory
 def remember_db(key: str, value: Any) -> None:
     conn = connect()
+    ts = now()
+    stored = json.dumps(value) if not isinstance(value, str) else value
     conn.execute(
         "INSERT OR REPLACE INTO memory(key, value, updated_at) VALUES (?,?,?)",
-        (key, json.dumps(value) if not isinstance(value, str) else value, now()),
+        (key, stored, ts),
     )
     conn.commit()
     conn.close()
+    _journal("memory", key, "upsert", {"key": key, "value": stored, "updated_at": ts})
 
 
 def recall_db(key: str) -> Optional[Any]:
@@ -263,6 +360,7 @@ def forget_db(key: str) -> None:
     conn.execute("DELETE FROM memory WHERE key=?", (key,))
     conn.commit()
     conn.close()
+    _journal("memory", key, "delete", None)
 
 
 def get_all_memory_db() -> Dict[str, Any]:
@@ -323,6 +421,24 @@ def add_memory_item_db(item: Dict[str, Any]) -> bool:
     conn.commit()
     added = cur.rowcount > 0
     conn.close()
+    if added:
+        _journal(
+            "memory_items",
+            item["item_id"],
+            "upsert",
+            {
+                "item_id": item["item_id"],
+                "text": item["text"],
+                "key": item.get("key", ""),
+                "kind": item.get("kind", "fact"),
+                "source": item.get("source", ""),
+                "tags": ",".join(tags),
+                "session": item.get("session", ""),
+                "hash": item["hash"],
+                "created_at": ts,
+                "updated_at": ts,
+            },
+        )
     return added
 
 
@@ -355,24 +471,37 @@ def delete_memory_item_db(item_id: str) -> bool:
     conn.commit()
     deleted = cur.rowcount > 0
     conn.close()
+    if deleted:
+        _journal("memory_items", item_id, "delete", None)
     return deleted
 
 
 def delete_memory_items_by_source_db(source: str) -> int:
     conn = connect()
+    ids = [
+        r["item_id"]
+        for r in conn.execute(
+            "SELECT item_id FROM memory_items WHERE source=?", (source,)
+        ).fetchall()
+    ]
     cur = conn.execute("DELETE FROM memory_items WHERE source=?", (source,))
     conn.commit()
     count = cur.rowcount
     conn.close()
+    for item_id in ids:
+        _journal("memory_items", item_id, "delete", None)
     return count
 
 
 def clear_memory_items_db() -> int:
     conn = connect()
+    ids = [r["item_id"] for r in conn.execute("SELECT item_id FROM memory_items").fetchall()]
     cur = conn.execute("DELETE FROM memory_items")
     conn.commit()
     count = cur.rowcount
     conn.close()
+    for item_id in ids:
+        _journal("memory_items", item_id, "delete", None)
     return count
 
 
@@ -442,6 +571,22 @@ def add_wa_message_db(message: Dict[str, Any]) -> bool:
     conn.commit()
     inserted = cur.rowcount > 0
     conn.close()
+    if inserted:
+        _journal(
+            "wa_messages",
+            message["hash"],
+            "upsert",
+            {
+                "chat": message["chat"],
+                "sender": message.get("sender", ""),
+                "direction": message.get("direction", "in"),
+                "text": message["text"],
+                "ts": message.get("ts", ""),
+                "source": message.get("source", "live"),
+                "hash": message["hash"],
+                "created_at": message.get("created_at") or now(),
+            },
+        )
     return inserted
 
 
@@ -503,10 +648,16 @@ def last_outbound_ts_db(chat: str) -> str:
 
 def delete_wa_messages_db(chat: str) -> int:
     conn = connect()
+    hashes = [
+        r["hash"]
+        for r in conn.execute("SELECT hash FROM wa_messages WHERE chat=?", (chat,)).fetchall()
+    ]
     cur = conn.execute("DELETE FROM wa_messages WHERE chat=?", (chat,))
     conn.commit()
     count = cur.rowcount
     conn.close()
+    for h in hashes:
+        _journal("wa_messages", h, "delete", None)
     return count
 
 
@@ -558,16 +709,64 @@ def count_device_audit_db() -> int:
 
 
 # Messages
-def save_message(session_id: str, role: str, content: str, labels: Dict = None) -> None:
+def save_message(session_id: str, role: str, content: str, labels: Dict = None) -> str:
+    """Persist one chat message and return its stable global id (``msg_id``)."""
     if labels is None:
         labels = {}
+    msg_id = uuid.uuid4().hex
+    ts = now()
     conn = connect()
     conn.execute(
-        "INSERT INTO messages(session_id, role, content, labels, created_at) VALUES (?,?,?,?,?)",
-        (session_id, role, content, json.dumps(labels), now()),
+        "INSERT INTO messages(session_id, role, content, labels, created_at, msg_id) VALUES (?,?,?,?,?,?)",
+        (session_id, role, content, json.dumps(labels), ts, msg_id),
     )
     conn.commit()
     conn.close()
+    _journal(
+        "messages",
+        msg_id,
+        "upsert",
+        {
+            "msg_id": msg_id,
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "labels": json.dumps(labels),
+            "created_at": ts,
+        },
+    )
+    return msg_id
+
+
+def list_messages_db(session_id: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
+    """Newest-last chat messages, optionally filtered to one session."""
+    conn = connect()
+    if session_id:
+        rows = conn.execute(
+            "SELECT msg_id, session_id, role, content, labels, created_at FROM messages "
+            "WHERE session_id=? ORDER BY id DESC LIMIT ?",
+            (session_id, max(1, int(limit))),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT msg_id, session_id, role, content, labels, created_at FROM messages "
+            "ORDER BY id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        ).fetchall()
+    conn.close()
+    out = [
+        {
+            "msg_id": r["msg_id"],
+            "session_id": r["session_id"],
+            "role": r["role"],
+            "content": r["content"],
+            "labels": r["labels"] or "{}",
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+    out.reverse()
+    return out
 
 
 # Initialize DB on import

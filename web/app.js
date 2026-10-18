@@ -1753,6 +1753,8 @@ loadVoice();
 loadMemory();
 loadWhatsApp();
 loadDeviceControl();
+loadSync();
+loadSync();
 
 async function startImportFile(id) {
   const fs = ondeviceData && ondeviceData.device;
@@ -1815,3 +1817,102 @@ async function startImportFile(id) {
   };
   input.click();
 }
+async function loadSync() {
+  try {
+    const res = await fetch("/api/sync/status");
+    const s = await res.json();
+    if (!s.ok) return;
+    document.getElementById("sync-enabled").checked = !!s.enabled;
+    document.getElementById("sync-device-name").value = s.device_name || "";
+    document.getElementById("sync-interval").value = s.interval || 30;
+    document.getElementById("sync-port").value = s.port || 8772;
+    const tok = document.getElementById("sync-token");
+    if (tok) tok.value = "";
+    const peersEl = document.getElementById("sync-peers");
+    if (peersEl) {
+      peersEl.innerHTML = (s.peers || []).map(p => {
+        const set = p.token_set ? " (token set)" : "";
+        return `<div class="mem-item"><div class="mem-head"><strong>${p.url}</strong><span class="muted">${set}</span></div></div>`;
+      }).join("");
+    }
+    const info = document.getElementById("sync-info");
+    if (info) {
+      const addrs = (s.addresses && s.addresses.length) ? ` • This device: ${s.addresses.join(", ")}` : "";
+      info.textContent = `Device: ${s.device_id} • Journal: ${s.journal} • Last: ${s.last_sync || "never"}${addrs} • ${s.last_result || ""}`;
+    }
+    document.getElementById("sync-github-repo").value = s.github_repo || "";
+    document.getElementById("sync-github-path").value = s.github_path || "";
+    document.getElementById("sync-github-branch").value = s.github_branch || "";
+    const gtok = document.getElementById("sync-github-token");
+    if (gtok) gtok.value = s.github_token_set ? "••••••••" : "";
+  } catch (e) {}
+}
+
+async function saveSync() {
+  const body = {
+    enabled: document.getElementById("sync-enabled").checked,
+    device_name: document.getElementById("sync-device-name").value,
+    interval: parseInt(document.getElementById("sync-interval").value || "30"),
+    port: parseInt(document.getElementById("sync-port").value || "8772"),
+  };
+  const tok = document.getElementById("sync-token").value;
+  if (tok) body.token = tok;
+  const grepo = document.getElementById("sync-github-repo").value;
+  if (grepo) body.github_repo = grepo;
+  const gpath = document.getElementById("sync-github-path").value;
+  if (gpath) body.github_path = gpath;
+  const gbranch = document.getElementById("sync-github-branch").value;
+  if (gbranch) body.github_branch = gbranch;
+  const gtok = document.getElementById("sync-github-token").value;
+  if (gtok && !gtok.startsWith("•")) body.github_token = gtok;
+  const msg = document.getElementById("sync-status-msg");
+  msg.textContent = "Saving...";
+  try {
+    await fetch("/api/sync/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    msg.textContent = "Saved.";
+    await loadSync();
+  } catch (e) { msg.textContent = "Failed."; }
+}
+
+document.getElementById("sync-save").addEventListener("click", saveSync);
+document.getElementById("sync-now").addEventListener("click", async () => {
+  const msg = document.getElementById("sync-status-msg");
+  msg.textContent = "Syncing...";
+  try {
+    const r = await (await fetch("/api/sync/now", {method:"POST"})).json();
+    msg.textContent = r.ok ? `Done: applied=${r.applied} sent=${r.sent}` : (r.error||"Failed");
+    await loadSync();
+  } catch (e) { msg.textContent = "Failed."; }
+});
+document.getElementById("sync-token-get").addEventListener("click", async () => {
+  try {
+    const r = await (await fetch("/api/sync/token?action=get", {method:"POST"})).json();
+    document.getElementById("sync-token").value = r.token || "";
+  } catch {}
+});
+document.getElementById("sync-token-rotate").addEventListener("click", async () => {
+  try {
+    const r = await (await fetch("/api/sync/token?action=rotate", {method:"POST"})).json();
+    document.getElementById("sync-token").value = r.token || "";
+    await loadSync();
+  } catch {}
+});
+document.getElementById("sync-peer-add").addEventListener("click", async () => {
+  const url = document.getElementById("sync-peer-url").value.trim();
+  const token = document.getElementById("sync-peer-token").value.trim();
+  if (!url) return;
+  const status = await (await fetch("/api/sync/status")).json();
+  const peers = (status.peers||[]).map(p=>({url:p.url, token:p.token||""}));
+  peers.push({url, token});
+  await fetch("/api/sync/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({peers})});
+  document.getElementById("sync-peer-url").value = ""; document.getElementById("sync-peer-token").value = "";
+  await loadSync();
+});
+document.getElementById("sync-github-push").addEventListener("click", async () => {
+  const m = document.getElementById("sync-github-status"); m.textContent="Pushing...";
+  try { const r = await (await fetch("/api/sync/github/push",{method:"POST"})).json(); m.textContent = r.ok?"Pushed":"Failed"; } catch { m.textContent="Failed"; }
+});
+document.getElementById("sync-github-pull").addEventListener("click", async () => {
+  const m = document.getElementById("sync-github-status"); m.textContent="Pulling...";
+  try { const r = await (await fetch("/api/sync/github/pull",{method:"POST"})).json(); m.textContent = r.ok?"Pulled":"Failed"; } catch { m.textContent="Failed"; }
+});

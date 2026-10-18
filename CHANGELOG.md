@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. Dates use YYYY-MM-DD.
 
+## 2026-10-18 (Cross-surface sync: APK / WebUI / desktop / v1.8.0)
+- **Sync core (`jarvis/sync.py`)**: every write to a syncable table now appends to a `sync_journal`. Devices trade journal lines and replay them with deterministic last-write-wins on `(ts, device_id)`, so all devices converge regardless of order. Deletes travel as tombstones, so a row removed on the phone stays removed on the laptop.
+- **What syncs**: settings (except secrets and this device's own `sync.*`), memory key-value, memory items, notes, tasks, chat messages and WhatsApp messages. API keys (`secret.*`) and sync identity are never journalled and a peer can never overwrite them.
+- **LAN transport**: each device runs a small token-protected listener on port 8772 (`GET /api/sync/changes`, `POST /api/sync/apply`), separate from the loopback-only WebUI on 8771 - the full API is never exposed to the network. A background loop syncs every 30s (configurable); SYNC NOW triggers it on demand.
+- **GitHub fallback**: optional push/pull of a full snapshot (`jarvis-sync.json`) to a repo via the Contents API for off-LAN backup.
+- **API**: `/api/sync/status`, `/api/sync/settings`, `/api/sync/token`, `/api/sync/now`, `/api/sync/changes`, `/api/sync/apply`, `/api/sync/export`, `/api/sync/import`, `/api/sync/github/{push,pull}`.
+- **WebUI**: new "Cross-surface sync" settings section - enable, device name, interval, listener port, shared token (reveal/rotate), peer list add/remove, SYNC NOW, and GitHub push/pull. Shows this device's LAN addresses so you know what to type on the other device.
+- **Schema**: `messages.msg_id` (stable global id, backfilled), `sync_journal`, `sync_seen`, all created/migrated automatically and non-fatally.
+- Added 10 tests (`tests/test_phase25_sync.py`): journalling + secret exclusion, paging, LWW + tombstones + idempotency, snapshot round-trip, LAN peer pull/push, listener auth, and endpoint behaviour. Full regression suite passes (**434 tests across 41 modules**).
+- **APK v1.8.0 (versionCode 13)**, arm64-v8a.
+
 ## 2026-10-18 (On-device chat actually works after download / v1.6.1)
 - **Root-cause fix (Java)**: `llm/OnDeviceLlm.isLoaded()` checked a static `conversation` field that was never assigned (only per-call local conversations exist), so it could never return true - the bridge rejected every `generate()` with "no model loaded" even after a successful LOAD. Readiness is now engine-based (`engine != null`); the dead `conversation` field is gone.
 - **Downloads are gated on device RAM**: `start_download()` compares the catalogue's `min_ram_gb` with the device's real memory (Android only) and refuses with an actionable message ("this device has 3.9 GB RAM but Gemma 4 E2B needs 8 GB or more - pick a smaller model") - the exact trap that let an 8 GB model land on a 4 GB emulator.

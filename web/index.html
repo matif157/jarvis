@@ -155,7 +155,7 @@
       <div id="engines-status" class="status"></div>
 
       <h2 style="margin-top:32px" id="ondevice">On-device model</h2>
-      <p class="hint">Run chat fully offline on this phone (LiteRT-LM / Gemma). Download once, stay on the device. Gemma downloads need a free Hugging Face token with the license accepted once (Service API keys above).</p>
+      <p class="hint">Run chat fully offline on this phone (LiteRT-LM / Gemma). Download once from the catalogue, or use IMPORT FILE to load a .litertlm file you already have (e.g. downloaded via Chrome). Gemma downloads need a free Hugging Face token with the license accepted once (Service API keys above).</p>
       <div id="ondevice-info" class="hint"></div>
       <div id="ondevice-list" class="od-list"></div>
       <div id="ondevice-status" class="status"></div>
@@ -208,6 +208,63 @@
       </div>
       <div id="dev-status" class="status"></div>
       <div id="dev-audit" class="mem-list"></div>
+
+      <h2 style="margin-top:32px" id="sync">Cross-surface sync</h2>
+      <p class="hint">Keep chats, notes, tasks and memory in sync across the APK, WebUI and desktop. Every device runs a small sync listener on port 8772 (LAN only, protected by the shared token). Add each other's address as a peer; you can also push a manual backup to GitHub as a fallback.</p>
+      <div id="sync-info" class="hint"></div>
+      <div class="wa-settings">
+        <label class="inline">
+          <input type="checkbox" id="sync-enabled"> Enable LAN sync
+        </label>
+      </div>
+      <label>Device name
+        <input id="sync-device-name" placeholder="laptop, phone, etc">
+      </label>
+      <label>Sync interval (seconds)
+        <input id="sync-interval" type="number" min="5" max="300" placeholder="30">
+      </label>
+      <label>LAN listener port
+        <input id="sync-port" type="number" min="1024" max="65535" placeholder="8772">
+      </label>
+      <label>Shared sync token
+        <input id="sync-token" placeholder="leave blank to auto-generate">
+      </label>
+      <div class="actions">
+        <button id="sync-token-get">REVEAL TOKEN</button>
+        <button id="sync-token-rotate">ROTATE</button>
+        <button id="sync-save">SAVE SYNC</button>
+        <button id="sync-now">SYNC NOW</button>
+      </div>
+      <div id="sync-status-msg" class="status"></div>
+      <h3 style="margin-top:16px">Peers</h3>
+      <div id="sync-peers" class="mem-list"></div>
+      <label>Add peer URL
+        <input id="sync-peer-url" placeholder="http://192.168.1.50:8772">
+      </label>
+      <label>Peer token (if any)
+        <input id="sync-peer-token" placeholder="optional">
+      </label>
+      <div class="actions">
+        <button id="sync-peer-add">ADD PEER</button>
+      </div>
+      <h3 style="margin-top:16px">GitHub fallback (optional)</h3>
+      <label>Repo (owner/name)
+        <input id="sync-github-repo" placeholder="matif157/jarvis">
+      </label>
+      <label>Path in repo
+        <input id="sync-github-path" placeholder="jarvis-sync.json">
+      </label>
+      <label>Branch
+        <input id="sync-github-branch" placeholder="main">
+      </label>
+      <label>Token (PAT, repo scope)
+        <input id="sync-github-token" placeholder="ghp_...">
+      </label>
+      <div class="actions">
+        <button id="sync-github-push">GITHUB PUSH</button>
+        <button id="sync-github-pull">GITHUB PULL</button>
+      </div>
+      <div id="sync-github-status" class="status"></div>
 
       <h2 style="margin-top:32px">Preferences</h2>
       <label>Atif Assistant URL
